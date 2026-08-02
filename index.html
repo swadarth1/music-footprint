@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Afterglow — your music's digital footprint</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Playfair+Display:ital,wght@600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell" id="landing" hidden>
+      <nav class="nav">
+        <a class="wordmark" href="#top" aria-label="Afterglow home"><span class="spark">✦</span> afterglow</a>
+        <div class="nav-links"><a href="#how">How it works</a><a href="#sources">Sources</a></div>
+        <button class="text-button" data-scroll="#setup">Get started <span>↗</span></button>
+      </nav>
+
+      <section id="top" class="hero">
+        <p class="eyebrow">LISTENING, IN CONTEXT</p>
+        <h1>The internet around<br />the music <em>you loved.</em></h1>
+        <p class="hero-copy">Afterglow turns your Last.fm history into a living archive: the discussions, reviews, videos, artifacts, and small corners of the web that surrounded every listen.</p>
+        <button class="primary-button" data-scroll="#setup">Find my footprint <span>→</span></button>
+        <div class="hero-orbit" aria-hidden="true">
+          <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="orbit orbit-three"></div>
+          <div class="record">♫</div>
+          <span class="orbit-tag tag-one">reddit / 246 discussions</span><span class="orbit-tag tag-two">music is the message</span><span class="orbit-tag tag-three">12,480 scrobbles</span><span class="orbit-tag tag-four">video essay ↗</span>
+        </div>
+      </section>
+
+      <section id="how" class="intro section-grid">
+        <p class="eyebrow">YOUR LISTENS ARE THE START</p>
+        <div><h2>Every scrobble has a story outside the streaming app.</h2><p>We start with what you actually listened to. Then we follow the trail outward—connecting artists, albums, and songs to the conversations and culture they generated.</p></div>
+      </section>
+
+      <section class="steps">
+        <article><span>01</span><h3>Connect Last.fm</h3><p>Your listening history gives the archive its shape. Read-only, always.</p></article>
+        <article><span>02</span><h3>Choose a chapter</h3><p>Look at a week, a season, or a whole year of your musical life.</p></article>
+        <article><span>03</span><h3>Follow the echoes</h3><p>Explore what the wider web was saying around the music you returned to.</p></article>
+      </section>
+
+      <section id="setup" class="setup">
+        <div class="setup-heading"><p class="eyebrow">BUILD YOUR FIRST ARCHIVE</p><h2>Start with a<br /><em>listening chapter.</em></h2><p>A profile takes less than a minute. We’ll show you a preview before searching anything beyond Last.fm.</p></div>
+        <form id="profile-form" class="profile-card">
+          <label for="username">Your Last.fm username</label>
+          <div class="input-wrap"><span>last.fm/user/</span><input id="username" name="username" placeholder="e.g. moonlitlistener" required autocomplete="username" /></div>
+          <fieldset><legend>What period should we explore?</legend><div class="periods"><label><input type="radio" name="period" value="week" /><span>This week</span></label><label><input type="radio" name="period" value="month" checked /><span>Past month</span></label><label><input type="radio" name="period" value="year" /><span>Past year</span></label><label><input type="radio" name="period" value="all time" /><span>All time</span></label></div></fieldset>
+          <div class="preference"><div><strong>Send a listening recap</strong><small>Occasional email when your archive finds something worth revisiting.</small></div><label class="toggle"><input type="checkbox" id="recap" checked /><span></span></label></div>
+          <button class="primary-button full" type="submit">Create my archive <span>→</span></button>
+          <p class="fine-print">By continuing, you’ll connect a public Last.fm profile. You can remove your data anytime.</p>
+        </form>
+      </section>
+
+      <section id="sources" class="sources">
+        <p class="eyebrow">THE WEB, GATHERED WITH CARE</p><h2>Not just links.<br />A cultural trace.</h2>
+        <div class="source-grid">
+          <div class="source featured"><span class="source-icon">◌</span><strong>Conversations</strong><p>Reddit threads, forum lore, YouTube comments, and listener annotations.</p></div>
+          <div class="source"><span class="source-icon">▰</span><strong>Criticism</strong><p>Album reviews, interviews, video essays, and newsletter write-ups.</p></div>
+          <div class="source"><span class="source-icon">✶</span><strong>Release trail</strong><p>Bandcamp, Discogs, setlists, lyrics, samples, and cover versions.</p></div>
+          <div class="source"><span class="source-icon">◈</span><strong>Artifacts</strong><p>Wikipedia history, eBay ephemera, old press, flyers, and fan sites.</p></div>
+          <div class="source"><span class="source-icon">◒</span><strong>Live life</strong><p>Concert listings, recordings, festival lineups, and tour memories.</p></div>
+          <div class="source"><span class="source-icon">⌁</span><strong>Connections</strong><p>Collaborators, labels, influences, scenes, and songs your music points toward.</p></div>
+        </div>
+      </section>
+
+      <section class="decision-note"><p class="eyebrow">A FEW DECISIONS, EARLY</p><div><h2>Useful by default.<br />Intentional by design.</h2><ul><li><b>Private by default.</b> Listening history remains yours; shareable archives are opt-in.</li><li><b>Source-aware.</b> Every finding links to its origin and labels what is editorial, community, or marketplace material.</li><li><b>Quality over volume.</b> Recaps surface a few genuinely interesting trails—not a pile of search results.</li></ul></div></section>
+
+      <footer><a class="wordmark" href="#top"><span class="spark">✦</span> afterglow</a><p>For the stories behind the songs.</p><span>© 2026</span></footer>
+    </main>
+    <main id="archive" class="archive">
+      <nav class="archive-nav"><span class="archive-mark">listening archive</span><span class="archive-issue" id="issue">UNCONFIGURED</span></nav>
+      <section class="board-setup"><div class="setup-title"><p>YOUR LISTENING BOARD</p><h1>Leave a<br /><em>trace.</em></h1></div><form id="board-form"><label>Last.fm username<input id="board-username" required placeholder="username" autocomplete="username" /></label><label>Range<select id="board-period"><option value="7day">Week</option><option value="1month" selected>Month</option><option value="12month">Year</option><option value="overall">All time</option></select></label><button type="submit">Build board <span>→</span></button><small>Your Last.fm key is configured locally and never sent to the browser.</small></form></section>
+      <section class="board-meta" id="board-meta" hidden><p id="listening-summary"></p><div class="board-limits" aria-label="Listening board limits"><label>Top <select id="limit-songs"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option><option>7</option><option>8</option><option>9</option><option>10</option></select> songs</label><label>Top <select id="limit-albums"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option><option>7</option><option>8</option><option>9</option><option>10</option></select> albums</label><label>Top <select id="limit-artists"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option selected>6</option><option>7</option><option>8</option><option>9</option><option>10</option></select> artists</label></div><button id="edit-board">Edit listening inputs</button></section>
+      <section class="trace-grid source-grid-live" id="traces" aria-label="Source embeds"><div class="empty-board">Enter a public Last.fm username and API key to collect the first real traces.</div></section>
+    </main>
+    <script src="./script.js"></script>
+  </body>
+</html>
