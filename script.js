@@ -5,18 +5,22 @@ const meta = document.querySelector('#board-meta');
 const summary = document.querySelector('#listening-summary');
 const sourceList = document.querySelector('#listening-sources');
 const issue = document.querySelector('#issue');
+const visibility = document.querySelector('#board-visibility');
 const usernameInput = document.querySelector('#board-username');
 const periodInput = document.querySelector('#board-period');
 const savedUsername = localStorage.getItem('music-footprint:lastfm-username');
 const savedPeriod = localStorage.getItem('music-footprint:lastfm-period');
 const limitInputs = { tracks: document.querySelector('#limit-songs'), albums: document.querySelector('#limit-albums'), artists: document.querySelector('#limit-artists') };
 const savedLimits = JSON.parse(localStorage.getItem('music-footprint:limits') || 'null');
+const visibilityInputs = [...document.querySelectorAll('#board-visibility input[data-component]')];
+const savedVisibility = JSON.parse(localStorage.getItem('music-footprint:visible-components') || '{}');
 
 if (savedUsername) usernameInput.value = savedUsername;
 if (savedPeriod) periodInput.value = savedPeriod;
-if (savedLimits) Object.entries(limitInputs).forEach(([key, input]) => { if (savedLimits[key]) input.value = savedLimits[key]; });
+if (savedLimits) Object.entries(limitInputs).forEach(([key, input]) => { if (savedLimits[key] !== undefined) input.value = savedLimits[key]; });
+visibilityInputs.forEach((input) => { if (typeof savedVisibility[input.dataset.component] === 'boolean') input.checked = savedVisibility[input.dataset.component]; });
 
-const selectedLimits = () => Object.fromEntries(Object.entries(limitInputs).map(([key, input]) => [key, Number(input.value)]));
+const selectedLimits = () => Object.fromEntries(Object.entries(limitInputs).map(([key, input]) => [key, Math.min(20, Math.max(0, Number(input.value) || 0))]));
 const boardCacheKey = (username, period, limits) => `${username}\u0000${period}\u0000${limits.tracks}\u0000${limits.albums}\u0000${limits.artists}`;
 
 let restoredBoard = false;
@@ -26,6 +30,8 @@ try {
   if (cachedBoard?.username === usernameInput.value && cachedBoard?.period === periodInput.value && JSON.stringify(cachedLimits) === JSON.stringify(selectedLimits()) && cachedBoard?.html) {
     setup.hidden = true;
     meta.hidden = false;
+    visibility.hidden = false;
+    visibility.hidden = false;
     issue.textContent = `${cachedBoard.username.toUpperCase()} · ${cachedBoard.period.toUpperCase()}`;
     summary.textContent = cachedBoard.summary || 'Your saved listening board';
     sourceList.textContent = cachedBoard.sources || '';
@@ -41,7 +47,7 @@ try {
 const escapeHtml = (value) => value.replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
 const lastfmUrl = (artist, track) => track ? `https://www.last.fm/music/${encodeURIComponent(artist)}/_/${encodeURIComponent(track)}` : `https://www.last.fm/music/${encodeURIComponent(artist)}`;
 const periodLabel = (period) => ({ '7day': 'the last week', '1month': 'the last month', '3month': 'the last 3 months', '6month': 'the last 6 months', '12month': 'the last year', ytd: 'year to date', '5year': 'the last 5 years', overall: 'all time' }[period] || period);
-const playLabel = (count, period) => `${Number(count).toLocaleString()} ${Number(count) === 1 ? 'scrobble' : 'scrobbles'} in ${periodLabel(period)}`;
+const playLabel = (count, period) => `${Number(count).toLocaleString()} ${Number(count) === 1 ? 'scrobble' : 'scrobbles'} ${period === 'overall' ? 'of all time' : `in ${periodLabel(period)}`}`;
 const shuffle = (items) => {
   const shuffled = [...items];
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
@@ -91,8 +97,31 @@ async function topFromRecentHistory(apiRequest, from, limits) {
   };
 }
 
-const draggableCardSelector = '.wiki-summary,.citation-source,.lastfm-source,.lrclib-source,.setlist-source,.rym-source';
+const draggableCardSelector = '.wiki-summary,.citation-source,.lastfm-source,.lrclib-source';
 let draggedCard = null;
+
+function componentForCard(card) {
+  if (card.classList.contains('wiki-summary')) return 'wiki';
+  if (card.classList.contains('citation-source')) return 'citation';
+  if (card.classList.contains('lrclib-source')) return 'lyrics';
+  if (card.classList.contains('lastfm-source')) return card.classList.contains('album') ? 'album' : card.classList.contains('artist') ? 'artist' : 'track';
+  return '';
+}
+
+function updateDisplayedCardCount() {
+  const cardCount = [...traces.querySelectorAll(draggableCardSelector)].filter((card) => !card.hidden).length;
+  const baseSummary = summary.textContent.replace(/\s*·\s*\d+\s+cards?\s*$/i, '').trim();
+  summary.textContent = `${baseSummary} · ${cardCount} cards`;
+}
+
+function applyComponentVisibility() {
+  const settings = Object.fromEntries(visibilityInputs.map((input) => [input.dataset.component, input.checked]));
+  traces.querySelectorAll(draggableCardSelector).forEach((card) => {
+    const component = componentForCard(card);
+    card.hidden = component && settings[component] === false;
+  });
+  updateDisplayedCardCount();
+}
 
 function applySavedCardOrder() {
   const cards = [...traces.querySelectorAll(draggableCardSelector)];
@@ -104,10 +133,16 @@ function applySavedCardOrder() {
 }
 
 function prepareBoardCards() {
+  // Boards saved before RYM was removed may still contain its old cards.
+  traces.querySelectorAll('.rym-source').forEach((card) => card.remove());
+  [...traces.childNodes].forEach((node) => {
+    if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) node.remove();
+  });
   traces.querySelectorAll(draggableCardSelector).forEach((card) => {
     card.draggable = true;
     card.classList.add('draggable-card');
   });
+  applyComponentVisibility();
   applySavedCardOrder();
 }
 
@@ -144,21 +179,53 @@ traces.addEventListener('dragend', () => {
 
 if (restoredBoard) prepareBoardCards();
 
-function selectMusicResult(results, artist) {
+function musicNameMatches(results, artist) {
   const normalizedArtist = artist.toLowerCase();
   const musicHint = /\b(band|musician|singer|rapper|songwriter|recording artist|music group|duo|artist)\b/i;
-  const nameMatches = results.filter((result) => {
+  return results.filter((result) => {
     const title = result.title.toLowerCase();
-    return title.startsWith(normalizedArtist) || title.startsWith(`the ${normalizedArtist}`);
+    return (title.startsWith(normalizedArtist) || title.startsWith(`the ${normalizedArtist}`)) && musicHint.test(`${result.title} ${result.snippet}`);
   });
-  return nameMatches.find((result) => musicHint.test(`${result.title} ${result.snippet}`)) || nameMatches[0];
 }
 
-async function wikipediaCard(artist, listeningStat) {
+function selectMusicResult(results, artist, expectedType = '') {
+  const groupHint = /\b(band|music group|rock group|duo|collective)\b/i;
+  const nameMatches = musicNameMatches(results, artist);
+  if (expectedType === 'Group') return nameMatches.find((result) => groupHint.test(`${result.title} ${result.snippet}`)) || nameMatches.find((result) => /\(band\)|\(group\)/i.test(result.title));
+  return nameMatches[0];
+}
+
+async function musicIdentity(artist, mbid, bio = '') {
+  const cacheKey = `music-footprint:identity:${mbid || artist.toLowerCase()}`;
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+    if (cached?.type) return cached;
+  } catch { /* Re-resolve malformed cached identity data. */ }
+  let identity;
+  try {
+    const response = await fetch(`/api/musicbrainz?${new URLSearchParams(mbid ? { mbid } : { artist })}`);
+    if (!response.ok) throw new Error('No MusicBrainz match.');
+    const payload = await response.json();
+    const candidate = mbid ? payload : (payload.artists || []).find((item) => item.name?.toLowerCase() === artist.toLowerCase() && item.type === 'Group');
+    if (candidate?.type) identity = { type: candidate.type, source: 'musicbrainz' };
+  } catch { /* Fall back to explicit Last.fm biography language. */ }
+  identity ||= { type: /\b(is|are) an? (?:american |british |canadian |english )?(?:indie |rock |pop |electronic |alternative )?(band|group|duo)\b/i.test(bio) ? 'Group' : '', source: 'lastfm' };
+  try { localStorage.setItem(cacheKey, JSON.stringify(identity)); } catch { /* Identity caching is an optimization only. */ }
+  return identity;
+}
+
+async function wikipediaCard(artist, listeningStat, options = {}) {
   const search = new URL('https://en.wikipedia.org/w/api.php');
   search.search = new URLSearchParams({ action: 'query', list: 'search', srsearch: `${artist} band musician music`, srlimit: '8', format: 'json', origin: '*' });
   const searchPayload = await fetch(search).then((response) => response.json());
-  const result = selectMusicResult(searchPayload.query?.search || [], artist);
+  const results = searchPayload.query?.search || [];
+  const ambiguous = musicNameMatches(results, artist).length > 1;
+  let identity = { type: '' };
+  if (ambiguous) {
+    const bio = options.getBio ? await options.getBio() : '';
+    identity = await musicIdentity(artist, options.mbid, bio);
+  }
+  const result = selectMusicResult(results, artist, identity.type);
   if (!result) throw new Error(`No music-related Wikipedia result for ${artist}.`);
   const title = result.title.replaceAll(' ', '_');
   const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
@@ -205,7 +272,7 @@ async function wikipediaCard(artist, listeningStat) {
     })
     .filter((citation) => !/web\.archive\.(org|com)|archive\.org|archive\.(today|ph|is)|wayback|webcache/i.test(citation.url))
     .filter((citation, index, list) => list.findIndex((item) => item.url === citation.url) === index)
-    .slice(0, 5);
+    .slice(0, 3);
   const wikiUrl = page.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(result.title)}`;
   const wiki = `<article class="wiki-summary" data-card-id="wiki-${encodeURIComponent(artist)}"><div class="wiki-header"><span class="personal-stat">${escapeHtml(listeningStat)}</span><img class="wiki-logo" src="https://upload.wikimedia.org/wikipedia/commons/6/63/Wikipedia-logo.png" alt="Wikipedia" /></div><div class="wiki-copy">${image}${formattedText}</div><a class="wiki-open" href="${wikiUrl}" target="_blank" rel="noreferrer" aria-label="Open Wikipedia source">↗</a></article>`;
   const citationCards = await Promise.all(citations.map((citation) => citationCard(citation, listeningStat, artist, wikiUrl)));
@@ -244,22 +311,6 @@ async function lrclibCard(artist, track, listeningStat) {
   return `<a class="lrclib-source" data-card-id="lyrics-${encodeURIComponent(`${artist}-${track}`)}" href="${geniusUrl}" target="_blank" rel="noreferrer" aria-label="Open Genius annotations for ${escapeHtml(track)}"><small class="personal-stat">${escapeHtml(listeningStat)}</small><img class="genius-logo" src="/assets/genius-logo.png" alt="Genius" /><img class="service-logo lrclib-logo" src="https://lrclib.net/favicon.ico" alt="LRCLIB" /><q>${escapeHtml(payload.excerpt)}…</q><span>${escapeHtml(track)} · ${escapeHtml(artist)}<br />Lyrics provided by LRCLIB · annotations on Genius</span><i>↗</i></a>`;
 }
 
-function rateYourMusicCard(artist, listeningStat) {
-  const href = `https://rateyourmusic.com/search?searchtype=a&searchterm=${encodeURIComponent(artist)}`;
-  return `<a class="rym-source" data-card-id="rym-${encodeURIComponent(artist)}" href="${href}" target="_blank" rel="noreferrer" aria-label="Search Rate Your Music for ${escapeHtml(artist)}"><small class="personal-stat">${escapeHtml(listeningStat)}</small><img class="service-logo" src="https://rateyourmusic.com/favicon.ico" alt="Rate Your Music" /><span>Rate Your Music</span><p>${escapeHtml(artist)}</p><small>Community ratings, genres, lists, and release pages</small><i>↗</i></a>`;
-}
-
-async function setlistCard(artist, listeningStat) {
-  const response = await fetch(`/api/setlistfm?${new URLSearchParams({ artist })}`);
-  if (!response.ok) return '';
-  const setlist = await response.json();
-  if (!setlist?.eventDate) return '';
-  const venue = [setlist.venue?.name, setlist.venue?.city?.name, setlist.venue?.city?.country?.name].filter(Boolean).join(' · ');
-  const songCount = (setlist.sets?.set || []).reduce((count, set) => count + (set.song?.length || 0), 0);
-  const href = setlist.url || `https://www.setlist.fm/search?query=${encodeURIComponent(`${artist} ${setlist.eventDate}`)}`;
-  return `<a class="setlist-source" data-card-id="setlist-${encodeURIComponent(`${artist}-${setlist.id}`)}" href="${href}" target="_blank" rel="noreferrer" aria-label="Open Setlist.fm setlist for ${escapeHtml(artist)}"><small class="personal-stat">${escapeHtml(listeningStat)}</small><img class="service-logo" src="https://www.setlist.fm/favicon.ico" alt="Setlist.fm" /><span>Setlist.fm</span><p>${escapeHtml(setlist.eventDate)}</p><small>${escapeHtml(venue || artist)}${songCount ? ` · ${songCount} songs` : ''}</small><i>↗</i></a>`;
-}
-
 function descriptionText(wiki) {
   return (wiki?.content || wiki?.summary || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().replace(/Read more on Last\.fm\.?$/i, '').slice(0, 800);
 }
@@ -271,14 +322,14 @@ function artwork(info, fallback = '') {
 
 function lastfmTrackFacts(track) {
   const metrics = [];
-  if (track?.listeners) metrics.push({ value: Number(track.listeners).toLocaleString(), label: 'listeners' });
-  if (track?.playcount) metrics.push({ value: Number(track.playcount).toLocaleString(), label: 'total scrobbles' });
+  if (track?.listeners) metrics.push({ value: Number(track.listeners).toLocaleString(), label: 'listeners across Last.fm' });
+  if (track?.playcount) metrics.push({ value: Number(track.playcount).toLocaleString(), label: 'scrobbles across Last.fm' });
   return metrics.map((metric) => `<span class="lastfm-metric"><strong>${metric.value}</strong><small>${metric.label}</small></span>`).join('');
 }
 
 function lastfmAlbumFacts(album) {
   const metrics = [];
-  if (album?.playcount) metrics.push({ value: Number(album.playcount).toLocaleString(), label: 'total scrobbles' });
+  if (album?.playcount) metrics.push({ value: Number(album.playcount).toLocaleString(), label: 'scrobbles across Last.fm' });
   const tracks = Array.isArray(album?.tracks?.track) ? album.tracks.track : [];
   const durationValue = tracks.reduce((total, track) => total + Number(track.duration || 0), 0);
   const seconds = durationValue > 10000 ? Math.round(durationValue / 1000) : Math.round(durationValue);
@@ -291,21 +342,28 @@ function lastfmAlbumFacts(album) {
   return { markup: `${metricMarkup}${detailMarkup}`, length };
 }
 
-function lastfmArtistFacts(artist) {
-  const listeners = artist?.stats?.listeners || artist?.listeners;
-  if (!listeners) return '';
-  return `<span class="lastfm-metric"><strong>${Number(listeners).toLocaleString()}</strong><small>total listeners</small></span>`;
+function lastfmArtistFacts(artist, fallbackArtist = {}) {
+  // Last.fm returns this in `stats` for artist.getInfo. Keep the fallback for
+  // responses where it is surfaced directly on the top-artist result instead.
+  const listeners = artist?.stats?.listeners ?? artist?.listeners ?? fallbackArtist?.stats?.listeners ?? fallbackArtist?.listeners;
+  const count = Number(String(listeners ?? '').replace(/,/g, ''));
+  if (!Number.isFinite(count) || count < 1) return '';
+  return `<span class="lastfm-metric"><strong>${count.toLocaleString()}</strong><small>listeners across Last.fm</small></span>`;
 }
 
 function lastfmPageCard(kind, artist, title, stat, imageUrl, description = '', facts = '', titleDetail = '') {
   const pageUrl = kind === 'artist' ? lastfmUrl(artist) : kind === 'album' ? `https://www.last.fm/music/${encodeURIComponent(artist)}/${encodeURIComponent(title)}` : lastfmUrl(artist, title);
-  const cover = imageUrl && !['album', 'artist'].includes(kind) ? `<img class="lastfm-art" src="${imageUrl}" alt="" />` : '';
+  const cover = imageUrl && !['album', 'artist'].includes(kind) && !description ? `<img class="lastfm-art" src="${imageUrl}" alt="" />` : '';
   const hasInlineArtwork = ['album', 'artist'].includes(kind) && imageUrl;
   const titleMarkup = hasInlineArtwork ? `<div class="lastfm-title-row"><img class="${kind}-art" src="${imageUrl}" alt="" /><div class="lastfm-title-copy"><span>${escapeHtml(title)}</span>${kind === 'album' ? `<em>${escapeHtml(artist)}</em>` : ''}${titleDetail ? `<small class="lastfm-title-detail">${escapeHtml(titleDetail)}</small>` : ''}</div></div>` : `<span>${escapeHtml(title)}</span>`;
-  const artistMarkup = ['album', 'artist'].includes(kind) && hasInlineArtwork ? '' : `<em>${escapeHtml(artist)}</em>`;
+  const artistMarkup = kind === 'artist' || (kind === 'album' && hasInlineArtwork) ? '' : `<em>${escapeHtml(artist)}</em>`;
   const body = description ? `<p>${escapeHtml(description)}</p>` : '';
   const metrics = facts ? `<div class="lastfm-facts">${facts}</div>` : '';
   return `<a class="lastfm-source ${kind} ${description ? 'has-description' : 'compact'}" data-card-id="lastfm-${kind}-${encodeURIComponent(`${artist}-${title}`)}" href="${pageUrl}" target="_blank" rel="noreferrer" aria-label="Open Last.fm ${kind} page for ${escapeHtml(title)}"><small class="personal-stat">${escapeHtml(stat)}</small><img class="service-logo" src="/assets/lastfm-logo.png" alt="Last.fm" />${cover}<div>${titleMarkup}${artistMarkup}<b>${escapeHtml(kind)} page</b>${body}${metrics}</div><i>↗</i></a>`;
+}
+
+function cacheCurrentBoard(username, period, limits) {
+  localStorage.setItem('music-footprint:board', JSON.stringify({ username, period, limits, summary: summary.textContent, sources: sourceList.textContent, html: traces.innerHTML }));
 }
 
 form.addEventListener('submit', async (event) => {
@@ -338,13 +396,17 @@ form.addEventListener('submit', async (event) => {
       if (!hasVisibleCache) traces.innerHTML = '<div class="empty-board">Reading your listening history for this custom range…</div>';
       ({ tracks, artists, albums } = await topFromRecentHistory(apiRequest, from, limits));
     } else {
-      const [payload, artistPayload, albumPayload] = await Promise.all([apiRequest('user.gettoptracks', { limit: limits.tracks }), apiRequest('user.gettopartists', { limit: limits.artists }), apiRequest('user.gettopalbums', { limit: limits.albums })]);
+      const [payload, artistPayload, albumPayload] = await Promise.all([
+        limits.tracks ? apiRequest('user.gettoptracks', { limit: limits.tracks }) : Promise.resolve({ toptracks: { track: [] } }),
+        limits.artists ? apiRequest('user.gettopartists', { limit: limits.artists }) : Promise.resolve({ topartists: { artist: [] } }),
+        limits.albums ? apiRequest('user.gettopalbums', { limit: limits.albums }) : Promise.resolve({ topalbums: { album: [] } }),
+      ]);
       if (payload.error) throw new Error(payload.message || 'Last.fm did not return listening data.');
       tracks = payload.toptracks?.track || [];
       artists = artistPayload.topartists?.artist || [];
       albums = albumPayload.topalbums?.album || [];
     }
-    if (!tracks.length) throw new Error('No listening data was found for this range.');
+    if (!tracks.length && !artists.length && !albums.length) throw new Error('Choose at least one song, album, or artist option.');
 
     setup.hidden = true;
     meta.hidden = false;
@@ -363,30 +425,32 @@ form.addEventListener('submit', async (event) => {
     }));
     const artistCards = await Promise.all(artists.map(async (artist) => {
       const artistStat = playLabel(artist.playcount, period);
-      const wiki = await wikipediaCard(artist.name, artistStat).catch(() => []);
-      const rym = rateYourMusicCard(artist.name, artistStat);
-      const setlist = await setlistCard(artist.name, artistStat).catch(() => '');
-      if (wiki.length) return [...wiki, rym, setlist];
-      const details = await apiRequest('artist.getInfo', { artist: artist.name }).catch(() => ({}));
-      return [lastfmPageCard('artist', artist.name, artist.name, artistStat, artwork(details.artist, artwork(artist, '')), descriptionText(details.artist?.bio), lastfmArtistFacts(details.artist)), rym, setlist];
+      let details;
+      const getDetails = async () => {
+        if (!details) details = await apiRequest('artist.getInfo', artist.mbid ? { mbid: artist.mbid } : { artist: artist.name }).catch(() => ({}));
+        return details;
+      };
+      const wiki = await wikipediaCard(artist.name, artistStat, { mbid: artist.mbid, getBio: async () => {
+        const profile = await getDetails();
+        return profile.artist?.bio?.content || profile.artist?.bio?.summary || '';
+      } }).catch(() => []);
+      details = await getDetails();
+      const lastfm = lastfmPageCard('artist', artist.name, artist.name, artistStat, artwork(details.artist, artwork(artist, '')), descriptionText(details.artist?.bio), lastfmArtistFacts(details.artist, artist));
+      return [...wiki, lastfm];
     }));
     const albumCards = await Promise.all(albums.map(async (album) => {
       const artist = album.artist?.name || album.artist;
+      const albumStat = playLabel(album.playcount, period);
       const details = await apiRequest('album.getInfo', { artist, album: album.name }).catch(() => ({}));
       const albumFacts = lastfmAlbumFacts(details.album);
-      return lastfmPageCard('album', artist, album.name, playLabel(album.playcount, period), artwork(details.album, artwork(album, '')), descriptionText(details.album?.wiki), albumFacts.markup, albumFacts.length);
+      return lastfmPageCard('album', artist, album.name, albumStat, artwork(details.album, artwork(album, '')), descriptionText(details.album?.wiki), albumFacts.markup, albumFacts.length);
     }));
-    traces.innerHTML = shuffle([...artistCards.flat(), ...cards.flat(), ...albumCards]).join('');
+    const allCards = [...artistCards.flat(), ...cards.flat(), ...albumCards.flat()].filter(Boolean);
+    traces.innerHTML = shuffle(allCards).join('');
+    summary.textContent = `${tracks.length} top songs · ${albums.length} top albums · ${artists.length} top artists`;
     prepareBoardCards();
     delete traces.dataset.cacheKey;
-    localStorage.setItem('music-footprint:board', JSON.stringify({
-      username,
-      period,
-      limits,
-      summary: summary.textContent,
-      sources: sourceList.textContent,
-      html: traces.innerHTML,
-    }));
+    cacheCurrentBoard(username, period, limits);
     meta.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (error) {
     if (!hasVisibleCache) traces.innerHTML = `<div class="empty-board error">${escapeHtml(error.message)} Check the username and API key, then try again.</div>`;
@@ -399,12 +463,18 @@ form.addEventListener('submit', async (event) => {
 document.querySelector('#edit-board').addEventListener('click', () => {
   setup.hidden = false;
   meta.hidden = true;
+  visibility.hidden = true;
   document.querySelector('#board-username').focus();
 });
 
 Object.values(limitInputs).forEach((input) => input.addEventListener('change', () => {
+  input.value = String(Math.min(20, Math.max(0, Number(input.value) || 0)));
   localStorage.setItem('music-footprint:limits', JSON.stringify(selectedLimits()));
-  if (setup.hidden) form.requestSubmit();
+}));
+
+visibilityInputs.forEach((input) => input.addEventListener('change', () => {
+  localStorage.setItem('music-footprint:visible-components', JSON.stringify(Object.fromEntries(visibilityInputs.map((control) => [control.dataset.component, control.checked]))));
+  applyComponentVisibility();
 }));
 
 if (restoredBoard) window.setTimeout(() => form.requestSubmit(), 0);

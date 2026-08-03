@@ -6,20 +6,26 @@ const https = require('https');
 const root = __dirname;
 const port = Number(process.env.PORT || 4175);
 const lrclibExcerptLineCount = 4;
-const env = Object.fromEntries(
-  fs.readFileSync(path.join(root, '.env'), 'utf8')
+const envFile = path.join(root, '.env');
+const localEnv = fs.existsSync(envFile) ? Object.fromEntries(
+  fs.readFileSync(envFile, 'utf8')
     .split(/\r?\n/)
     .filter((line) => line && !line.startsWith('#'))
     .map((line) => {
       const equalsAt = line.indexOf('=');
       return [line.slice(0, equalsAt), line.slice(equalsAt + 1)];
     })
-);
+) : {};
+const env = { ...localEnv, ...process.env };
 const allowedMethods = new Set(['user.gettoptracks', 'user.gettopartists', 'user.gettopalbums', 'user.getrecenttracks', 'track.getInfo', 'album.getInfo', 'artist.getInfo']);
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.png': 'image/png' };
 
 function decodeHtml(value) {
-  return value.replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&nbsp;/gi, ' ');
+  let decoded = String(value || '');
+  for (let pass = 0; pass < 3; pass += 1) {
+    decoded = decoded.replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&nbsp;/gi, ' ').replace(/&#x([0-9a-f]+);?/gi, (_, code) => String.fromCodePoint(parseInt(code, 16))).replace(/&#(\d+);?/g, (_, code) => String.fromCodePoint(Number(code)));
+  }
+  return decoded;
 }
 
 function extractArticlePreview(html) {
@@ -27,10 +33,12 @@ function extractArticlePreview(html) {
   const title = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i)?.[1] || html.match(/<title[^>]*>([^<]+)/i)?.[1] || '';
   const main = html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1] || html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] || html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] || '';
   const cleanFragment = (value) => decodeHtml(value.replace(/<(script|style|nav|header|footer|aside)[^>]*>[\s\S]*?<\/\1>/gi, '').replace(/<\/(p|div|h[1-6]|li|br|blockquote)>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
-  const paragraphs = [...main.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)].map((match) => cleanFragment(match[1])).filter((paragraph) => paragraph.length > 80);
-  const text = paragraphs[0] || cleanFragment(main);
-  const excerpt = text.length > 80 ? text.slice(0, 360).replace(/\s+\S*$/, '').trim() : decodeHtml(meta?.[1] || '').trim();
-  const readableExcerpt = /\.mw-parser-output|\{\s*[\w-]+\s*:|background(?:-color)?\s*:|url\s*\(/i.test(excerpt) ? '' : excerpt;
+  const isBoilerplate = (value) => /(?:\b(?:archive|menu|home)\b.*\b(?:archive|menu|home|reviews|features)\b|\b(?:features?|reviews?)\s+(?:album\s+)?(?:reviews?|features?)\b|what'?s the rumpus|past perfect primitive futures)/i.test(value);
+  const paragraphs = [...main.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)].map((match) => cleanFragment(match[1])).filter((paragraph) => paragraph.length > 80 && !isBoilerplate(paragraph));
+  const metaExcerpt = decodeHtml(meta?.[1] || '').replace(/\s+/g, ' ').trim();
+  const text = paragraphs[0] || (metaExcerpt.length > 80 && !isBoilerplate(metaExcerpt) ? metaExcerpt : '');
+  const excerpt = text.length > 80 ? text.slice(0, 360).replace(/\s+\S*$/, '').trim() : '';
+  const readableExcerpt = /\.mw-parser-output|\{\s*[\w-]+\s*:|background(?:-color)?\s*:|url\s*\(|&#(?:x[0-9a-f]+|\d+);?/i.test(excerpt) ? '' : excerpt;
   return { title: decodeHtml(title).replace(/\s+/g, ' ').trim(), excerpt: readableExcerpt };
 }
 
@@ -78,17 +86,19 @@ http.createServer((request, response) => {
     const artist = url.searchParams.get('artist');
     const track = url.searchParams.get('track');
     const album = url.searchParams.get('album');
+    const mbid = url.searchParams.get('mbid');
     const limit = Number(url.searchParams.get('limit') || 6);
     const from = url.searchParams.get('from');
     const page = Number(url.searchParams.get('page') || 1);
     const isTopList = method === 'user.gettoptracks' || method === 'user.gettopartists' || method === 'user.gettopalbums';
     const isInfo = ['track.getInfo', 'album.getInfo', 'artist.getInfo'].includes(method);
-    if (!allowedMethods.has(method) || !user || !env.LASTFM_API_KEY || (isTopList && !period) || (isInfo && !artist) || (method === 'track.getInfo' && !track) || (method === 'album.getInfo' && !album)) return send(response, 400, JSON.stringify({ error: 6, message: 'Missing or invalid Last.fm request.' }));
+    if (!allowedMethods.has(method) || !user || !env.LASTFM_API_KEY || (isTopList && !period) || (isInfo && !artist && !(method === 'artist.getInfo' && mbid)) || (method === 'track.getInfo' && !track) || (method === 'album.getInfo' && !album)) return send(response, 400, JSON.stringify({ error: 6, message: 'Missing or invalid Last.fm request.' }));
     const query = new URLSearchParams({ method, user, format: 'json', api_key: env.LASTFM_API_KEY, autocorrect: '1' });
     if (isTopList) { query.set('period', period); query.set('limit', String(Math.min(20, Math.max(1, Number.isFinite(limit) ? limit : 6)))); }
     if (artist) query.set('artist', artist);
     if (track) query.set('track', track);
     if (album) query.set('album', album);
+    if (mbid) query.set('mbid', mbid);
     if (method === 'user.getrecenttracks') {
       if (from) query.set('from', from);
       query.set('page', String(Math.max(1, Number.isFinite(page) ? page : 1)));
@@ -99,6 +109,20 @@ http.createServer((request, response) => {
       upstream.on('data', (chunk) => { body += chunk; });
       upstream.on('end', () => send(response, upstream.statusCode || 502, body));
     }).on('error', () => send(response, 502, JSON.stringify({ error: 11, message: 'Unable to reach Last.fm.' })));
+    return;
+  }
+  if (url.pathname === '/api/musicbrainz') {
+    const mbid = url.searchParams.get('mbid');
+    const artist = url.searchParams.get('artist');
+    if (!mbid && !artist) return send(response, 400, JSON.stringify({ message: 'Artist or MBID is required.' }));
+    const target = mbid
+      ? `https://musicbrainz.org/ws/2/artist/${encodeURIComponent(mbid)}?fmt=json`
+      : `https://musicbrainz.org/ws/2/artist?fmt=json&limit=5&query=${encodeURIComponent(`artist:"${artist}" AND type:group`)}`;
+    https.get(target, { headers: { Accept: 'application/json', 'User-Agent': 'MusicFootprint/1.0 (local listening board)' } }, (upstream) => {
+      let body = '';
+      upstream.on('data', (chunk) => { body += chunk; });
+      upstream.on('end', () => send(response, upstream.statusCode || 502, body));
+    }).on('error', () => send(response, 502, JSON.stringify({ message: 'Unable to reach MusicBrainz.' })));
     return;
   }
   if (url.pathname === '/api/genius') {
@@ -154,33 +178,9 @@ http.createServer((request, response) => {
     fetchArticle(articleUrl).then((article) => send(response, 200, JSON.stringify(article))).catch(() => send(response, 204, ''));
     return;
   }
-  if (url.pathname === '/api/setlistfm') {
-    const artistName = url.searchParams.get('artist');
-    if (!artistName || !env.SETLISTFM_API_KEY) return send(response, 204, '');
-    const requestSetlist = (target) => new Promise((resolve, reject) => {
-      https.get(target, { headers: { Accept: 'application/json', 'x-api-key': env.SETLISTFM_API_KEY } }, (upstream) => {
-        let body = '';
-        upstream.on('data', (chunk) => { body += chunk; });
-        upstream.on('end', () => {
-          if (upstream.statusCode !== 200) return reject(new Error(`Setlist.fm returned ${upstream.statusCode}.`));
-          try { resolve(JSON.parse(body)); } catch { reject(new Error('Setlist.fm returned unreadable data.')); }
-        });
-      }).on('error', reject);
-    });
-    requestSetlist(`https://api.setlist.fm/1.0/search/artists?artistName=${encodeURIComponent(artistName)}&p=1`)
-      .then((search) => {
-        const normalized = artistName.trim().toLowerCase();
-        const artist = (search.artist || []).find((candidate) => candidate.name?.trim().toLowerCase() === normalized) || search.artist?.[0];
-        if (!artist?.mbid) throw new Error('No matching Setlist.fm artist.');
-        return requestSetlist(`https://api.setlist.fm/1.0/artist/${encodeURIComponent(artist.mbid)}/setlists?p=1`);
-      })
-      .then((payload) => send(response, 200, JSON.stringify(payload.setlist?.[0] || {})))
-      .catch(() => send(response, 204, ''));
-    return;
-  }
   const publicFiles = { '/': 'index.html', '/index.html': 'index.html', '/styles.css': 'styles.css', '/script.js': 'script.js', '/assets/genius-logo.png': 'assets/genius-logo.png', '/assets/lastfm-logo.png': 'assets/lastfm-logo.png' };
   const filename = publicFiles[url.pathname];
   if (!filename) return send(response, 404, 'Not found', 'text/plain');
   const filePath = path.join(root, filename);
   send(response, 200, fs.readFileSync(filePath), contentTypes[path.extname(filePath)] || 'application/octet-stream');
-}).listen(port, '127.0.0.1', () => console.log(`Listening board: http://127.0.0.1:${port}`));
+}).listen(port, '0.0.0.0', () => console.log(`Listening board on port ${port}`));
