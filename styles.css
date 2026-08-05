@@ -80,5 +80,4 @@
 .citation-source .personal-stat{right:14px}
 .source-grid-live:has(.wiki-summary:hover,.citation-source:hover,.lastfm-source:hover,.lrclib-source:hover) :is(.wiki-summary,.citation-source,.lastfm-source,.lrclib-source):not(:hover){opacity:.32;filter:brightness(.9)}
 .lastfm-source .artwork-swipe{position:relative;display:block;overflow:hidden;background:#efc6c3}.lastfm-source .artwork-swipe img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transform:translateX(108%);transition:transform .34s ease,opacity .22s ease}.lastfm-source .artwork-swipe img.is-active{opacity:1;transform:translateX(0)}.lastfm-source .artwork-swipe img.is-exiting{opacity:1;transform:translateX(-108%)}
-.lastfm-source .lastfm-title-row>.artwork-swipe{width:62px;height:62px;min-width:62px;flex:0 0 62px}
 @media(max-width:720px){.lastfm-source.album{grid-column:span 1;grid-row:span 2}}

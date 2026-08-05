@@ -353,8 +353,7 @@ function artworkVariants(info, fallback = '') {
   const images = [...(Array.isArray(info?.image) ? info.image.map((entry) => entry?.['#text']) : []), ...fallbackImages]
     .filter((image) => image && !image.includes('2a96cbd8b46e442fc41c2b86b821562f'));
   const preferred = info?.image?.find((entry) => entry.size === 'extralarge')?.['#text'] || images[0];
-  // The image array in getInfo is a set of size renditions, not alternatives.
-  return preferred ? [preferred] : [];
+  return [...new Set([preferred, ...images].filter(Boolean))];
 }
 
 function artwork(info, fallback = '') {
@@ -396,17 +395,6 @@ function artworkSwipe(kind, title, imageUrls) {
   if (!imageUrls.length) return '';
   const images = imageUrls.slice(0, 5).map((url, index) => `<img class="${index === 0 ? 'is-active' : ''}" src="${url}" alt="" />`).join('');
   return `<span class="${kind}-art artwork-swipe" data-artwork-count="${Math.min(imageUrls.length, 5)}" aria-label="${escapeHtml(title)} artwork">${images}</span>`;
-}
-
-async function artistArtworkVariants(artist, fallback) {
-  try {
-    const response = await fetch(`/api/lastfm-artist-images?${new URLSearchParams({ artist })}`);
-    const payload = response.ok ? await response.json() : {};
-    const images = Array.isArray(payload.images) ? payload.images : [];
-    return images.length ? images : [fallback].filter(Boolean);
-  } catch {
-    return [fallback].filter(Boolean);
-  }
 }
 
 function lastfmPageCard(kind, artist, title, stat, imageUrls = [], description = '', facts = '', titleDetail = '') {
@@ -495,7 +483,7 @@ form.addEventListener('submit', async (event) => {
         return profile.artist?.bio?.content || profile.artist?.bio?.summary || '';
       } }).catch(() => []);
       details = await getDetails();
-      const imageUrls = await artistArtworkVariants(artist.name, artwork(details.artist, artwork(artist, '')));
+      const imageUrls = artworkVariants(details.artist, artworkVariants(artist));
       const lastfm = lastfmPageCard('artist', artist.name, artist.name, artistStat, imageUrls, descriptionText(details.artist?.bio), lastfmArtistFacts(details.artist, artist));
       return [...wiki, lastfm];
     }));
@@ -504,7 +492,8 @@ form.addEventListener('submit', async (event) => {
       const albumStat = playLabel(album.playcount, period);
       const details = await apiRequest('album.getInfo', { artist, album: album.name }).catch(() => ({}));
       const albumFacts = lastfmAlbumFacts(details.album);
-      return lastfmPageCard('album', artist, album.name, albumStat, artwork(details.album, artwork(album, '')), descriptionText(details.album?.wiki), albumFacts.markup, albumFacts.length);
+      const imageUrls = artworkVariants(details.album, artworkVariants(album));
+      return lastfmPageCard('album', artist, album.name, albumStat, imageUrls, descriptionText(details.album?.wiki), albumFacts.markup, albumFacts.length);
     }));
     const allCards = [...artistCards.flat(), ...cards.flat(), ...albumCards.flat()].filter(Boolean);
     traces.innerHTML = shuffle(allCards).join('');
