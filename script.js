@@ -97,12 +97,13 @@ async function topFromRecentHistory(apiRequest, from, limits) {
   };
 }
 
-const draggableCardSelector = '.wiki-summary,.citation-source,.lastfm-source,.lrclib-source';
+const draggableCardSelector = '.wiki-summary,.citation-source,.lastfm-source,.lastfm-image,.lrclib-source';
 let draggedCard = null;
 
 function componentForCard(card) {
   if (card.classList.contains('wiki-summary')) return 'wiki';
   if (card.classList.contains('citation-source')) return 'citation';
+  if (card.classList.contains('lastfm-image')) return 'image';
   if (card.classList.contains('lrclib-source')) return 'lyrics';
   if (card.classList.contains('lastfm-source')) return card.classList.contains('album') ? 'album' : card.classList.contains('artist') ? 'artist' : 'track';
   return '';
@@ -351,6 +352,15 @@ function lastfmArtistFacts(artist, fallbackArtist = {}) {
   return `<span class="lastfm-metric"><strong>${count.toLocaleString()}</strong><small>listeners across Last.fm</small></span>`;
 }
 
+function lastfmImageCard(kind, artist, title, stat, imageUrl) {
+  if (!imageUrl) return '';
+  const href = kind === 'artist'
+    ? lastfmUrl(artist)
+    : `https://www.last.fm/music/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`;
+  const label = kind === 'album' ? `${title} — ${artist}` : title;
+  return `<a class="lastfm-image ${kind}-image" data-card-id="lastfm-image-${kind}-${encodeURIComponent(`${artist}-${title}`)}" href="${href}" target="_blank" rel="noreferrer" aria-label="Open Last.fm ${kind} image for ${escapeHtml(label)}"><small class="personal-stat">${escapeHtml(stat)}</small><img class="service-logo" src="/assets/lastfm-logo.png" alt="Last.fm" /><img class="lastfm-image-art" src="${imageUrl}" alt="${escapeHtml(label)}" /><span>${escapeHtml(label)}</span><i>↗</i></a>`;
+}
+
 function lastfmPageCard(kind, artist, title, stat, imageUrl, description = '', facts = '', titleDetail = '') {
   const pageUrl = kind === 'artist' ? lastfmUrl(artist) : kind === 'album' ? `https://www.last.fm/music/${encodeURIComponent(artist)}/${encodeURIComponent(title)}` : lastfmUrl(artist, title);
   const cover = imageUrl && !['album', 'artist'].includes(kind) && !description ? `<img class="lastfm-art" src="${imageUrl}" alt="" />` : '';
@@ -435,15 +445,20 @@ form.addEventListener('submit', async (event) => {
         return profile.artist?.bio?.content || profile.artist?.bio?.summary || '';
       } }).catch(() => []);
       details = await getDetails();
-      const lastfm = lastfmPageCard('artist', artist.name, artist.name, artistStat, artwork(details.artist, artwork(artist, '')), descriptionText(details.artist?.bio), lastfmArtistFacts(details.artist, artist));
-      return [...wiki, lastfm];
+      const imageUrl = artwork(details.artist, artwork(artist, ''));
+      const lastfm = lastfmPageCard('artist', artist.name, artist.name, artistStat, imageUrl, descriptionText(details.artist?.bio), lastfmArtistFacts(details.artist, artist));
+      return [...wiki, lastfm, lastfmImageCard('artist', artist.name, artist.name, artistStat, imageUrl)];
     }));
     const albumCards = await Promise.all(albums.map(async (album) => {
       const artist = album.artist?.name || album.artist;
       const albumStat = playLabel(album.playcount, period);
       const details = await apiRequest('album.getInfo', { artist, album: album.name }).catch(() => ({}));
       const albumFacts = lastfmAlbumFacts(details.album);
-      return lastfmPageCard('album', artist, album.name, albumStat, artwork(details.album, artwork(album, '')), descriptionText(details.album?.wiki), albumFacts.markup, albumFacts.length);
+      const imageUrl = artwork(details.album, artwork(album, ''));
+      return [
+        lastfmPageCard('album', artist, album.name, albumStat, imageUrl, descriptionText(details.album?.wiki), albumFacts.markup, albumFacts.length),
+        lastfmImageCard('album', artist, album.name, albumStat, imageUrl),
+      ];
     }));
     const allCards = [...artistCards.flat(), ...cards.flat(), ...albumCards.flat()].filter(Boolean);
     traces.innerHTML = shuffle(allCards).join('');
