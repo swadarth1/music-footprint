@@ -8,6 +8,9 @@ const issue = document.querySelector('#issue');
 const visibility = document.querySelector('#board-visibility');
 const usernameInput = document.querySelector('#board-username');
 const periodInput = document.querySelector('#board-period');
+const selectionPreview = document.querySelector('#selection-preview');
+const selectionPreviewStatus = document.querySelector('#selection-preview-status');
+const selectionPreviewResults = document.querySelector('#selection-preview-results');
 const savedUsername = localStorage.getItem('music-footprint:lastfm-username');
 const savedPeriod = localStorage.getItem('music-footprint:lastfm-period');
 const limitInputs = { tracks: document.querySelector('#limit-songs'), albums: document.querySelector('#limit-albums'), artists: document.querySelector('#limit-artists') };
@@ -22,6 +25,8 @@ visibilityInputs.forEach((input) => { if (typeof savedVisibility[input.dataset.c
 
 const selectedLimits = () => Object.fromEntries(Object.entries(limitInputs).map(([key, input]) => [key, Math.min(20, Math.max(0, Number(input.value) || 0))]));
 const boardCacheKey = (username, period, limits) => `${username}\u0000${period}\u0000${limits.tracks}\u0000${limits.albums}\u0000${limits.artists}`;
+let previewTimer;
+let previewRun = 0;
 
 let restoredBoard = false;
 try {
@@ -95,6 +100,77 @@ async function topFromRecentHistory(apiRequest, from, limits) {
     artists: rank(artistCounts, limits.artists, ([name, playcount]) => ({ name, playcount })),
     albums: rank(albumCounts, limits.albums, ([key, playcount]) => { const [artist, name] = key.split('\u0000'); return { name, playcount, artist: { name } }; }),
   };
+}
+
+function setSelectorAvailability() {
+  const hasUsername = Boolean(usernameInput.value.trim());
+  Object.values(limitInputs).forEach((input) => { input.disabled = !hasUsername; });
+  selectionPreview.hidden = !hasUsername;
+  if (!hasUsername) {
+    selectionPreviewStatus.textContent = 'Enter a Last.fm username to preview your board.';
+    selectionPreviewResults.innerHTML = '';
+  }
+}
+
+function selectionPreviewMarkup(title, items, formatter) {
+  if (!items.length) return `<div><b>${title}</b><span>None selected</span></div>`;
+  return `<div><b>${title}</b><span>${items.map(formatter).map(escapeHtml).join(' · ')}</span></div>`;
+}
+
+async function refreshSelectionPreview() {
+  const username = usernameInput.value.trim();
+  const limits = selectedLimits();
+  const period = periodInput.value;
+  const run = ++previewRun;
+  setSelectorAvailability();
+  if (!username) return;
+  if (!limits.tracks && !limits.albums && !limits.artists) {
+    selectionPreviewStatus.textContent = 'Choose at least one item to preview.';
+    selectionPreviewResults.innerHTML = '';
+    return;
+  }
+  selectionPreviewStatus.textContent = 'Finding the songs, albums, and artists this board will use…';
+  selectionPreviewResults.innerHTML = '';
+  const apiRequest = async (method, parameters = {}) => {
+    const response = await fetch(`/api/lastfm?${new URLSearchParams({ method, user: username, period, ...parameters })}`);
+    if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('The Last.fm service is unavailable.');
+    const payload = await response.json();
+    if (payload.error) throw new Error(payload.message || 'Last.fm could not read this profile.');
+    return payload;
+  };
+  try {
+    const from = customRangeStart(period);
+    let tracks;
+    let artists;
+    let albums;
+    if (from) {
+      ({ tracks, artists, albums } = await topFromRecentHistory(apiRequest, from, limits));
+    } else {
+      const [trackPayload, artistPayload, albumPayload] = await Promise.all([
+        limits.tracks ? apiRequest('user.gettoptracks', { limit: limits.tracks }) : Promise.resolve({ toptracks: { track: [] } }),
+        limits.artists ? apiRequest('user.gettopartists', { limit: limits.artists }) : Promise.resolve({ topartists: { artist: [] } }),
+        limits.albums ? apiRequest('user.gettopalbums', { limit: limits.albums }) : Promise.resolve({ topalbums: { album: [] } }),
+      ]);
+      tracks = trackPayload.toptracks?.track || [];
+      artists = artistPayload.topartists?.artist || [];
+      albums = albumPayload.topalbums?.album || [];
+    }
+    if (run !== previewRun) return;
+    selectionPreviewStatus.textContent = 'Your board will populate with:';
+    selectionPreviewResults.innerHTML = [
+      selectionPreviewMarkup('Songs', tracks, (track) => `${track.name} — ${track.artist?.name || track.artist}`),
+      selectionPreviewMarkup('Albums', albums, (album) => `${album.name} — ${album.artist?.name || album.artist}`),
+      selectionPreviewMarkup('Artists', artists, (artist) => artist.name),
+    ].join('');
+  } catch (error) {
+    if (run !== previewRun) return;
+    selectionPreviewStatus.textContent = error.message || 'Could not preview this profile.';
+  }
+}
+
+function scheduleSelectionPreview() {
+  window.clearTimeout(previewTimer);
+  previewTimer = window.setTimeout(refreshSelectionPreview, 450);
 }
 
 const draggableCardSelector = '.wiki-summary,.citation-source,.lastfm-source,.lrclib-source';
@@ -465,12 +541,21 @@ document.querySelector('#edit-board').addEventListener('click', () => {
   meta.hidden = true;
   visibility.hidden = true;
   document.querySelector('#board-username').focus();
+  scheduleSelectionPreview();
 });
 
 Object.values(limitInputs).forEach((input) => input.addEventListener('change', () => {
   input.value = String(Math.min(20, Math.max(0, Number(input.value) || 0)));
   localStorage.setItem('music-footprint:limits', JSON.stringify(selectedLimits()));
+  scheduleSelectionPreview();
 }));
+
+usernameInput.addEventListener('input', () => {
+  setSelectorAvailability();
+  scheduleSelectionPreview();
+});
+
+periodInput.addEventListener('change', scheduleSelectionPreview);
 
 visibilityInputs.forEach((input) => input.addEventListener('change', () => {
   localStorage.setItem('music-footprint:visible-components', JSON.stringify(Object.fromEntries(visibilityInputs.map((control) => [control.dataset.component, control.checked]))));
@@ -478,3 +563,5 @@ visibilityInputs.forEach((input) => input.addEventListener('change', () => {
 }));
 
 if (restoredBoard) window.setTimeout(() => form.requestSubmit(), 0);
+setSelectorAvailability();
+if (usernameInput.value.trim() && !restoredBoard) scheduleSelectionPreview();
