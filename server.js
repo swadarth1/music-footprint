@@ -72,6 +72,27 @@ function fetchArticle(url, redirects = 0) {
   });
 }
 
+function fetchLastfmArtistImages(artist) {
+  return new Promise((resolve, reject) => {
+    const target = `https://www.last.fm/music/${encodeURIComponent(artist)}/+images`;
+    https.get(target, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MusicFootprint/1.0)', Accept: 'text/html,application/xhtml+xml' } }, (upstream) => {
+      if (upstream.statusCode !== 200) return reject(new Error(`Last.fm returned ${upstream.statusCode}.`));
+      let body = '';
+      upstream.setEncoding('utf8');
+      upstream.on('data', (chunk) => { body += chunk; });
+      upstream.on('end', () => {
+        const decoded = body.replace(/\\u002F/g, '/').replace(/\\\//g, '/').replace(/&amp;/g, '&');
+        const matches = [...decoded.matchAll(/https?:\/\/[^"'\\\s<>]+lastfm[^"'\\\s<>]*\/i\/u\/[^"'\\\s<>]+/gi)].map((match) => match[0]);
+        const images = [...new Set(matches)]
+          .filter((image) => !image.includes('2a96cbd8b46e442fc41c2b86b821562f'))
+          .map((image) => image.replace(/\\/g, ''))
+          .slice(0, 8);
+        resolve(images);
+      });
+    }).on('error', reject);
+  });
+}
+
 function send(response, status, body, type = 'application/json') {
   response.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
   response.end(body);
@@ -176,6 +197,12 @@ http.createServer((request, response) => {
     const articleUrl = url.searchParams.get('url');
     if (!articleUrl || !isSafeExternalUrl(articleUrl)) return send(response, 400, JSON.stringify({ message: 'Invalid article URL.' }));
     fetchArticle(articleUrl).then((article) => send(response, 200, JSON.stringify(article))).catch(() => send(response, 204, ''));
+    return;
+  }
+  if (url.pathname === '/api/lastfm-artist-images') {
+    const artist = url.searchParams.get('artist');
+    if (!artist || artist.length > 200) return send(response, 400, JSON.stringify({ message: 'Artist is required.' }));
+    fetchLastfmArtistImages(artist).then((images) => send(response, 200, JSON.stringify({ images }))).catch(() => send(response, 204, ''));
     return;
   }
   const publicFiles = { '/': 'index.html', '/index.html': 'index.html', '/styles.css': 'styles.css', '/script.js': 'script.js', '/assets/genius-logo.png': 'assets/genius-logo.png', '/assets/lastfm-logo.png': 'assets/lastfm-logo.png' };
