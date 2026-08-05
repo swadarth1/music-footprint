@@ -154,7 +154,7 @@ async function refreshSelectionPreview() {
       albums = albumPayload.topalbums?.album || [];
     }
     if (run !== previewRun) return;
-    selectionPreviewStatus.textContent = 'Your board will populate with:';
+    selectionPreviewStatus.textContent = '';
     selectionPreviewResults.innerHTML = [
       selectionPreviewMarkup('Songs', tracks, (track) => `${track.name} — ${track.artist?.name || track.artist}`),
       selectionPreviewMarkup('Albums', albums, (album) => `${album.name} — ${album.artist?.name || album.artist}`),
