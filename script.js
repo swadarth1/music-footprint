@@ -26,6 +26,7 @@ const selectedLimits = () => Object.fromEntries(Object.entries(limitInputs).map(
 const boardCacheKey = (username, period, limits) => `${username}\u0000${period}\u0000${limits.tracks}\u0000${limits.albums}\u0000${limits.artists}`;
 let previewTimer;
 let previewRun = 0;
+const selectionPreviewCache = new Map();
 
 let restoredBoard = false;
 try {
@@ -115,6 +116,15 @@ function selectionPreviewMarkup(title, items, formatter) {
   return `<div class="selection-preview-column"><b>${title}</b><ol>${entries}</ol></div>`;
 }
 
+function renderSelectionPreview(selection, limits) {
+  selectionPreviewStatus.textContent = '';
+  selectionPreviewResults.innerHTML = [
+    selectionPreviewMarkup('Songs', selection.tracks.slice(0, limits.tracks), (track) => `${track.name} — ${track.artist?.name || track.artist}`),
+    selectionPreviewMarkup('Albums', selection.albums.slice(0, limits.albums), (album) => `${album.name} — ${album.artist?.name || album.artist}`),
+    selectionPreviewMarkup('Artists', selection.artists.slice(0, limits.artists), (artist) => artist.name),
+  ].join('');
+}
+
 async function refreshSelectionPreview() {
   const username = usernameInput.value.trim();
   const limits = selectedLimits();
@@ -122,12 +132,10 @@ async function refreshSelectionPreview() {
   const run = ++previewRun;
   setSelectorAvailability();
   if (!username) return;
-  if (!limits.tracks && !limits.albums && !limits.artists) {
-    selectionPreviewStatus.textContent = 'Choose at least one item to preview.';
-    selectionPreviewResults.innerHTML = '';
-    return;
-  }
-  selectionPreviewStatus.textContent = 'Finding the songs, albums, and artists this board will use…';
+  const cacheKey = `${username.toLowerCase()}\u0000${period}`;
+  const cachedSelection = selectionPreviewCache.get(cacheKey);
+  if (cachedSelection) return renderSelectionPreview(cachedSelection, limits);
+  selectionPreviewStatus.textContent = 'Loading your top 20 songs, albums, and artists…';
   selectionPreviewResults.innerHTML = '';
   const apiRequest = async (method, parameters = {}) => {
     const response = await fetch(`/api/lastfm?${new URLSearchParams({ method, user: username, period, ...parameters })}`);
@@ -142,24 +150,21 @@ async function refreshSelectionPreview() {
     let artists;
     let albums;
     if (from) {
-      ({ tracks, artists, albums } = await topFromRecentHistory(apiRequest, from, limits));
+      ({ tracks, artists, albums } = await topFromRecentHistory(apiRequest, from, { tracks: 20, albums: 20, artists: 20 }));
     } else {
       const [trackPayload, artistPayload, albumPayload] = await Promise.all([
-        limits.tracks ? apiRequest('user.gettoptracks', { limit: limits.tracks }) : Promise.resolve({ toptracks: { track: [] } }),
-        limits.artists ? apiRequest('user.gettopartists', { limit: limits.artists }) : Promise.resolve({ topartists: { artist: [] } }),
-        limits.albums ? apiRequest('user.gettopalbums', { limit: limits.albums }) : Promise.resolve({ topalbums: { album: [] } }),
+        apiRequest('user.gettoptracks', { limit: 20 }),
+        apiRequest('user.gettopartists', { limit: 20 }),
+        apiRequest('user.gettopalbums', { limit: 20 }),
       ]);
       tracks = trackPayload.toptracks?.track || [];
       artists = artistPayload.topartists?.artist || [];
       albums = albumPayload.topalbums?.album || [];
     }
     if (run !== previewRun) return;
-    selectionPreviewStatus.textContent = '';
-    selectionPreviewResults.innerHTML = [
-      selectionPreviewMarkup('Songs', tracks, (track) => `${track.name} — ${track.artist?.name || track.artist}`),
-      selectionPreviewMarkup('Albums', albums, (album) => `${album.name} — ${album.artist?.name || album.artist}`),
-      selectionPreviewMarkup('Artists', artists, (artist) => artist.name),
-    ].join('');
+    const selection = { tracks, artists, albums };
+    selectionPreviewCache.set(cacheKey, selection);
+    renderSelectionPreview(selection, limits);
   } catch (error) {
     if (run !== previewRun) return;
     selectionPreviewStatus.textContent = error.message || 'Could not preview this profile.';
