@@ -334,6 +334,9 @@ traces.addEventListener('click', (event) => {
   });
   if (!correct) option.classList.add('is-incorrect');
   quiz.querySelector('.quiz-feedback').textContent = correct ? 'Correct.' : `The answer is ${quiz.querySelector('.quiz-option.is-correct').textContent}.`;
+  quiz.classList.add('is-answered');
+  const explanation = quiz.querySelector('.quiz-explanation');
+  if (explanation) explanation.hidden = false;
 });
 
 if (restoredBoard) prepareBoardCards();
@@ -528,8 +531,8 @@ function infoboxLabelFact(markup) {
 
 async function artistTriviaFacts(artist, lastfmBio = '') {
   const facts = [];
-  const add = (fact, source, url) => {
-    if (fact && !facts.some((item) => item.type === fact.type)) facts.push({ ...fact, source, url });
+  const add = (fact, source, url, excerpt = '') => {
+    if (fact && !facts.some((item) => item.type === fact.type)) facts.push({ ...fact, source, url, excerpt });
   };
   try {
     const search = new URL('https://en.wikipedia.org/w/api.php');
@@ -539,17 +542,17 @@ async function artistTriviaFacts(artist, lastfmBio = '') {
     if (result) {
       const summary = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(result.title.replaceAll(' ', '_'))}`).then((response) => response.json());
       const wikiUrl = summary.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(result.title)}`;
-      add(locationFactFromBio(summary.extract, artist), 'Wikipedia', wikiUrl);
-      add(formationYearFactFromBio(summary.extract), 'Wikipedia', wikiUrl);
+      add(locationFactFromBio(summary.extract, artist), 'Wikipedia', wikiUrl, summary.extract);
+      add(formationYearFactFromBio(summary.extract), 'Wikipedia', wikiUrl, summary.extract);
       const parse = new URL('https://en.wikipedia.org/w/api.php');
       parse.search = new URLSearchParams({ action: 'parse', page: result.title, prop: 'text', format: 'json', origin: '*' });
       const parsed = await fetch(parse).then((response) => response.json());
-      add(infoboxLabelFact(parsed.parse?.text?.['*']), 'Wikipedia', wikiUrl);
+      add(infoboxLabelFact(parsed.parse?.text?.['*']), 'Wikipedia', wikiUrl, summary.extract);
     }
   } catch { /* Last.fm remains the fallback source. */ }
-  add(locationFactFromBio(lastfmBio, artist), 'Last.fm', lastfmUrl(artist));
-  add(formationYearFactFromBio(lastfmBio), 'Last.fm', lastfmUrl(artist));
-  add(labelFactFromBio(lastfmBio), 'Last.fm', lastfmUrl(artist));
+  add(locationFactFromBio(lastfmBio, artist), 'Last.fm', lastfmUrl(artist), lastfmBio);
+  add(formationYearFactFromBio(lastfmBio), 'Last.fm', lastfmUrl(artist), lastfmBio);
+  add(labelFactFromBio(lastfmBio), 'Last.fm', lastfmUrl(artist), lastfmBio);
   return facts;
 }
 
@@ -557,6 +560,33 @@ function quizQuestion(fact, artist) {
   if (fact.type === 'formationYear') return `In what year did ${artist} form?`;
   if (fact.type === 'label') return `Which label is listed for ${artist}?`;
   return fact.questionType === 'formation' ? `Where did ${artist} form?` : `Where is ${artist} from?`;
+}
+
+function quizExcerpt(fact) {
+  const document = new DOMParser().parseFromString(fact.excerpt || '', 'text/html');
+  document.querySelectorAll('script,style,iframe,object,embed').forEach((node) => node.remove());
+  const containingNode = [...document.querySelectorAll('p,li,div')].find((node) => node.textContent.toLowerCase().includes(fact.answer.toLowerCase())) || document.body;
+  containingNode.querySelectorAll('*').forEach((node) => {
+    if (node.tagName === 'A') {
+      const href = node.getAttribute('href') || '';
+      if (!/^https?:\/\//i.test(href)) node.replaceWith(document.createTextNode(node.textContent));
+      else {
+        [...node.attributes].forEach((attribute) => {
+          if (attribute.name !== 'href') node.removeAttribute(attribute.name);
+        });
+        node.setAttribute('target', '_blank');
+        node.setAttribute('rel', 'noreferrer');
+      }
+    } else if (!['EM', 'I', 'B', 'STRONG', 'BR'].includes(node.tagName)) {
+      node.replaceWith(document.createTextNode(node.textContent));
+    }
+  });
+  const text = containingNode.textContent.replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  if (text.length <= 320) return containingNode.innerHTML;
+  const answerIndex = text.toLowerCase().indexOf(fact.answer.toLowerCase());
+  const start = Math.max(0, answerIndex - 105);
+  return `${escapeHtml(`${start ? '…' : ''}${text.slice(start, start + 315).trim()}…`)}`;
 }
 
 function artistQuizCard(fact, listeningStat, distractorAnswers) {
@@ -567,7 +597,9 @@ function artistQuizCard(fact, listeningStat, distractorAnswers) {
   const choices = [...otherArtistAnswers, ...fallbackAnswers].slice(0, 3);
   if (choices.length < 3) return '';
   const options = shuffle([fact.answer, ...choices]).map((answer) => `<button class="quiz-option" type="button" data-correct="${answer === fact.answer}">${escapeHtml(answer)}</button>`).join('');
-  return `<article class="quiz-source" data-card-id="quiz-${fact.type}-${encodeURIComponent(fact.artist)}"><small class="personal-stat">${escapeHtml(listeningStat)}</small><span class="quiz-kicker">Artist quiz</span><p>${escapeHtml(quizQuestion(fact, fact.artist))}</p><div class="quiz-options">${options}</div><small class="quiz-feedback" aria-live="polite"></small><a class="quiz-source-link" href="${fact.url}" target="_blank" rel="noreferrer">Source: ${escapeHtml(fact.source)} ↗</a></article>`;
+  const excerpt = quizExcerpt(fact);
+  const explanation = excerpt ? `<div class="quiz-explanation" hidden>${excerpt}</div>` : '';
+  return `<article class="quiz-source" data-card-id="quiz-${fact.type}-${encodeURIComponent(fact.artist)}"><small class="personal-stat">${escapeHtml(listeningStat)}</small><span class="quiz-kicker">Artist quiz</span><p>${escapeHtml(quizQuestion(fact, fact.artist))}</p><div class="quiz-options">${options}</div><small class="quiz-feedback" aria-live="polite"></small>${explanation}<a class="quiz-source-link" href="${fact.url}" target="_blank" rel="noreferrer">Source: ${escapeHtml(fact.source)} ↗</a></article>`;
 }
 
 async function geniusPageUrl(artist, track) {
