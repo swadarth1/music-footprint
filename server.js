@@ -36,8 +36,15 @@ function extractArticlePreview(html) {
   const cleanFragment = (value) => decodeHtml(value.replace(/<(script|style|nav|header|footer|aside)[^>]*>[\s\S]*?<\/\1>/gi, '').replace(/<\/(p|div|h[1-6]|li|br|blockquote)>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
   const isBoilerplate = (value) => /(?:\b(?:archive|menu|home)\b.*\b(?:archive|menu|home|reviews|features)\b|\b(?:features?|reviews?)\s+(?:album\s+)?(?:reviews?|features?)\b|what'?s the rumpus|past perfect primitive futures)/i.test(value);
   const paragraphs = [...main.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)].map((match) => cleanFragment(match[1])).filter((paragraph) => paragraph.length > 80 && !isBoilerplate(paragraph));
+  const structuredBodies = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].flatMap((match) => {
+    try {
+      const value = JSON.parse(match[1]);
+      const collect = (item) => Array.isArray(item) ? item.flatMap(collect) : item && typeof item === 'object' ? [item.articleBody, item.description, ...(item['@graph'] ? collect(item['@graph']) : [])].filter((entry) => typeof entry === 'string') : [];
+      return collect(value).map(cleanFragment).filter((entry) => entry.length > 80 && !isBoilerplate(entry));
+    } catch { return []; }
+  });
   const metaExcerpt = decodeHtml(meta?.[1] || '').replace(/\s+/g, ' ').trim();
-  const text = paragraphs[0] || (metaExcerpt.length > 80 && !isBoilerplate(metaExcerpt) ? metaExcerpt : '');
+  const text = paragraphs[0] || structuredBodies[0] || (metaExcerpt.length > 80 && !isBoilerplate(metaExcerpt) ? metaExcerpt : '');
   const excerpt = text.length > 80 ? text.slice(0, 360).replace(/\s+\S*$/, '').trim() : '';
   const readableExcerpt = /\.mw-parser-output|\{\s*[\w-]+\s*:|background(?:-color)?\s*:|url\s*\(|&#(?:x[0-9a-f]+|\d+);?/i.test(excerpt) ? '' : excerpt;
   return { title: decodeHtml(title).replace(/\s+/g, ' ').trim(), excerpt: readableExcerpt, publishedAt: decodeHtml(publishedAt).replace(/\s+/g, ' ').trim() };
@@ -56,7 +63,7 @@ function fetchArticle(url, redirects = 0) {
     if (!isSafeExternalUrl(url) || redirects > 3) return reject(new Error('Unsafe or unsupported article URL.'));
     const target = new URL(url);
     const client = target.protocol === 'https:' ? https : http;
-    const upstreamRequest = client.get(target, { headers: { 'User-Agent': 'MusicFootprint/1.0 (local listening board)', Accept: 'text/html,application/xhtml+xml' } }, (upstream) => {
+    const upstreamRequest = client.get(target, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MusicFootprint/1.0)', Accept: 'text/html,application/xhtml+xml', 'Accept-Language': 'en-US,en;q=0.9' } }, (upstream) => {
       if ([301, 302, 303, 307, 308].includes(upstream.statusCode) && upstream.headers.location) return resolve(fetchArticle(new URL(upstream.headers.location, target).toString(), redirects + 1));
       if (upstream.statusCode !== 200) return reject(new Error(`Article returned ${upstream.statusCode}.`));
       if (!String(upstream.headers['content-type'] || '').includes('text/html')) return reject(new Error('Source is not an HTML article.'));
