@@ -20,6 +20,9 @@ const limitInputs = { tracks: document.querySelector('#limit-songs'), albums: do
 const savedLimits = JSON.parse(localStorage.getItem('music-footprint:limits') || 'null');
 const visibilityInputs = [...document.querySelectorAll('#board-visibility input[data-component]')];
 const savedVisibility = JSON.parse(localStorage.getItem('music-footprint:visible-components') || '{}');
+const articleLimitInput = document.querySelector('#article-limit');
+const articleLimitValue = document.querySelector('#article-limit-value');
+const savedArticleLimit = Number(localStorage.getItem('music-footprint:article-limit'));
 
 if (savedUsername) usernameInput.value = savedUsername;
 if (savedPeriod && [...periodInput.options].some((option) => option.value === savedPeriod)) periodInput.value = savedPeriod;
@@ -27,6 +30,8 @@ if (savedCustomRange?.start) rangeStartInput.value = savedCustomRange.start;
 if (savedCustomRange?.end) rangeEndInput.value = savedCustomRange.end;
 if (savedLimits) Object.entries(limitInputs).forEach(([key, input]) => { if (savedLimits[key] !== undefined) input.value = savedLimits[key]; });
 visibilityInputs.forEach((input) => { if (typeof savedVisibility[input.dataset.component] === 'boolean') input.checked = savedVisibility[input.dataset.component]; });
+if (Number.isFinite(savedArticleLimit)) articleLimitInput.value = String(Math.min(4, Math.max(0, savedArticleLimit)));
+articleLimitValue.textContent = articleLimitInput.value;
 
 const selectedLimits = () => Object.fromEntries(Object.entries(limitInputs).map(([key, input]) => [key, Math.min(20, Math.max(0, Number(input.value) || 0))]));
 const rangeSignature = () => periodInput.value === 'custom' ? `custom:${rangeStartInput.value}:${rangeEndInput.value}` : periodInput.value;
@@ -240,9 +245,10 @@ function updateDisplayedCardCount() {
 
 function applyComponentVisibility() {
   const settings = Object.fromEntries(visibilityInputs.map((input) => [input.dataset.component, input.checked]));
+  const articleLimit = Number(articleLimitInput.value);
   traces.querySelectorAll(draggableCardSelector).forEach((card) => {
     const component = componentForCard(card);
-    card.hidden = component && settings[component] === false;
+    card.hidden = component === 'citation' ? Number(card.dataset.articleIndex || 0) >= articleLimit : component && settings[component] === false;
   });
   updateDisplayedCardCount();
 }
@@ -417,14 +423,14 @@ async function wikipediaCard(artist, listeningStat, options = {}) {
     })
     .filter((citation) => !/web\.archive\.(org|com)|archive\.org|archive\.(today|ph|is)|wayback|webcache/i.test(citation.url))
     .filter((citation, index, list) => list.findIndex((item) => item.url === citation.url) === index)
-    .slice(0, 3);
+    .slice(0, 4);
   const wikiUrl = page.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(result.title)}`;
   const wiki = `<article class="wiki-summary" data-card-id="wiki-${encodeURIComponent(artist)}"><div class="wiki-header"><span class="personal-stat">${escapeHtml(listeningStat)}</span><img class="wiki-logo" src="https://upload.wikimedia.org/wikipedia/commons/6/63/Wikipedia-logo.png" alt="Wikipedia" /></div><div class="wiki-copy">${image}${formattedText}</div><a class="wiki-open" href="${wikiUrl}" target="_blank" rel="noreferrer" aria-label="Open Wikipedia source">↗</a></article>`;
-  const citationCards = await Promise.all(citations.map((citation) => citationCard(citation, listeningStat, artist, wikiUrl)));
+  const citationCards = await Promise.all(citations.map((citation, index) => citationCard(citation, listeningStat, artist, wikiUrl, index)));
   return [wiki, ...citationCards];
 }
 
-async function citationCard(citation, listeningStat, artist, wikiUrl) {
+async function citationCard(citation, listeningStat, artist, wikiUrl, articleIndex = 0) {
   const source = new URL(citation.url).hostname.replace(/^www\./, '');
   const favicon = `https://${source}/favicon.ico`;
   const title = citation.title.replace(/\s+/g, ' ').slice(0, 170);
@@ -440,7 +446,7 @@ async function citationCard(citation, listeningStat, artist, wikiUrl) {
   } catch { /* Citation cards remain useful even when an article cannot be read. */ }
   const articleExcerpt = excerpt ? `<small class="citation-excerpt">${escapeHtml(excerpt)}</small>` : '';
   const dateMarkup = publishedAt ? `<time class="citation-date">${escapeHtml(publishedAt)}</time>` : '';
-  return `<article class="citation-source" data-card-id="citation-${encodeURIComponent(citation.url)}"><a class="citation-main" href="${citation.url}" target="_blank" rel="noreferrer" aria-label="Open Wikipedia-cited source ${escapeHtml(title)}"></a><small class="personal-stat">${escapeHtml(listeningStat)}</small><div class="citation-label"><span>Wikipedia citation</span><span class="citation-brand"><img src="${favicon}" alt="" onerror="this.style.display='none'" /><b>${escapeHtml(source)}</b></span></div>${dateMarkup}<p>${escapeHtml(title)}</p>${articleExcerpt}<small class="citation-origin">From <a href="${wikiUrl}" target="_blank" rel="noreferrer">${escapeHtml(artist)}</a></small><a class="citation-open" href="${citation.url}" target="_blank" rel="noreferrer" aria-label="Open citation">↗</a></article>`;
+  return `<article class="citation-source" data-article-index="${articleIndex}" data-card-id="citation-${encodeURIComponent(citation.url)}"><a class="citation-main" href="${citation.url}" target="_blank" rel="noreferrer" aria-label="Open Wikipedia-cited source ${escapeHtml(title)}"></a><small class="personal-stat">${escapeHtml(listeningStat)}</small><div class="citation-label"><span>Wikipedia citation</span><span class="citation-brand"><img src="${favicon}" alt="" onerror="this.style.display='none'" /><b>${escapeHtml(source)}</b></span></div>${dateMarkup}<p>${escapeHtml(title)}</p>${articleExcerpt}<small class="citation-origin">From <a href="${wikiUrl}" target="_blank" rel="noreferrer">${escapeHtml(artist)}</a></small><a class="citation-open" href="${citation.url}" target="_blank" rel="noreferrer" aria-label="Open citation">↗</a></article>`;
 }
 
 const fallbackQuizLocations = [
@@ -717,6 +723,12 @@ visibilityInputs.forEach((input) => input.addEventListener('change', () => {
   localStorage.setItem('music-footprint:visible-components', JSON.stringify(Object.fromEntries(visibilityInputs.map((control) => [control.dataset.component, control.checked]))));
   applyComponentVisibility();
 }));
+
+articleLimitInput.addEventListener('input', () => {
+  articleLimitValue.textContent = articleLimitInput.value;
+  localStorage.setItem('music-footprint:article-limit', articleLimitInput.value);
+  applyComponentVisibility();
+});
 
 if (restoredBoard) window.setTimeout(() => form.requestSubmit(), 0);
 syncCustomRangeControls();
