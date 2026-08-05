@@ -3,7 +3,6 @@ const setup = document.querySelector('.board-setup');
 const traces = document.querySelector('#traces');
 const meta = document.querySelector('#board-meta');
 const summary = document.querySelector('#listening-summary');
-const sourceList = document.querySelector('#listening-sources');
 const issue = document.querySelector('#issue');
 const visibility = document.querySelector('#board-visibility');
 const usernameInput = document.querySelector('#board-username');
@@ -39,7 +38,6 @@ try {
     visibility.hidden = false;
     issue.textContent = `${cachedBoard.username.toUpperCase()} · ${cachedBoard.period.toUpperCase()}`;
     summary.textContent = cachedBoard.summary || 'Your saved listening board';
-    sourceList.textContent = cachedBoard.sources || '';
     traces.innerHTML = cachedBoard.html;
     traces.dataset.cacheKey = boardCacheKey(cachedBoard.username, cachedBoard.period, cachedLimits);
     restoredBoard = true;
@@ -113,8 +111,8 @@ function setSelectorAvailability() {
 }
 
 function selectionPreviewMarkup(title, items, formatter) {
-  if (!items.length) return `<div><b>${title}</b><span>None selected</span></div>`;
-  return `<div><b>${title}</b><span>${items.map(formatter).map(escapeHtml).join(' · ')}</span></div>`;
+  const entries = items.length ? items.map(formatter).map((item) => `<li>${escapeHtml(item)}</li>`).join('') : '<li>None selected</li>';
+  return `<div class="selection-preview-column"><b>${title}</b><ol>${entries}</ol></div>`;
 }
 
 async function refreshSelectionPreview() {
@@ -439,7 +437,7 @@ function lastfmPageCard(kind, artist, title, stat, imageUrl, description = '', f
 }
 
 function cacheCurrentBoard(username, period, limits) {
-  localStorage.setItem('music-footprint:board', JSON.stringify({ username, period, limits, summary: summary.textContent, sources: sourceList.textContent, html: traces.innerHTML }));
+  localStorage.setItem('music-footprint:board', JSON.stringify({ username, period, limits, summary: summary.textContent, html: traces.innerHTML }));
 }
 
 form.addEventListener('submit', async (event) => {
@@ -488,7 +486,6 @@ form.addEventListener('submit', async (event) => {
     meta.hidden = false;
     issue.textContent = `${username.toUpperCase()} · ${period.toUpperCase()}`;
     summary.textContent = `${tracks.length} top songs · ${albums.length} top albums · ${artists.length} top artists`;
-    sourceList.textContent = `Songs: ${tracks.map((track) => track.name).join(' · ')}\nAlbums: ${albums.map((album) => album.name).join(' · ')}\nArtists: ${artists.map((artist) => artist.name).join(' · ')}`;
     if (!hasVisibleCache) traces.innerHTML = '<div class="empty-board">Finding artist summaries and lyric sources…</div>';
     const cards = await Promise.all(tracks.flatMap(async (track) => {
       const artist = track.artist.name;
