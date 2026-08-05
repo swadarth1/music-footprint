@@ -90,16 +90,11 @@ function rangeBounds(period) {
   return { from, to };
 }
 
-async function topFromRecentHistory(apiRequest, from, limits, to) {
+async function topFromRecentHistory(apiRequest, from, limits, to, onProgress = () => {}) {
   const trackCounts = new Map();
   const artistCounts = new Map();
   const albumCounts = new Map();
-  let page = 1;
-  let totalPages = 1;
-  do {
-    const parameters = { from, page, limit: 200 };
-    if (to) parameters.to = to;
-    const payload = await apiRequest('user.getrecenttracks', parameters);
+  const addPage = (payload) => {
     if (payload.error) throw new Error(payload.message || 'Last.fm could not read this listening range.');
     const entries = payload.recenttracks?.track || [];
     entries.filter((entry) => !entry['@attr']?.nowplaying).forEach((entry) => {
@@ -114,9 +109,28 @@ async function topFromRecentHistory(apiRequest, from, limits, to) {
         albumCounts.set(albumKey, (albumCounts.get(albumKey) || 0) + 1);
       }
     });
-    totalPages = Number(payload.recenttracks?.['@attr']?.totalPages || page);
-    page += 1;
-  } while (page <= totalPages);
+  };
+  const readPage = async (page) => {
+    const parameters = { from, page, limit: 200 };
+    if (to) parameters.to = to;
+    return apiRequest('user.getrecenttracks', parameters);
+  };
+  const firstPage = await readPage(1);
+  addPage(firstPage);
+  const totalPages = Number(firstPage.recenttracks?.['@attr']?.totalPages || 1);
+  let completedPages = 1;
+  onProgress(completedPages, totalPages);
+  const remainingPages = Array.from({ length: Math.max(0, totalPages - 1) }, (_, index) => index + 2);
+  const workerCount = Math.min(3, remainingPages.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (remainingPages.length) {
+      const page = remainingPages.shift();
+      const payload = await readPage(page);
+      addPage(payload);
+      completedPages += 1;
+      onProgress(completedPages, totalPages);
+    }
+  }));
   const rank = (entries, limit, mapper) => [...entries].sort((a, b) => b[1] - a[1]).slice(0, limit).map(mapper);
   return {
     tracks: rank(trackCounts, limits.tracks, ([key, playcount]) => { const [artist, name] = key.split('\u0000'); return { name, playcount, artist: { name } }; }),
@@ -199,7 +213,9 @@ async function refreshSelectionPreview() {
     let artists;
     let albums;
     if (bounds) {
-      ({ tracks, artists, albums } = await topFromRecentHistory(apiRequest, bounds.from, { tracks: 20, albums: 20, artists: 20 }, bounds.to));
+      ({ tracks, artists, albums } = await topFromRecentHistory(apiRequest, bounds.from, { tracks: 20, albums: 20, artists: 20 }, bounds.to, (completed, total) => {
+        if (run === previewRun) selectionPreviewStatus.textContent = `Reading your listening history (${completed} of ${total} pages)…`;
+      }));
     } else {
       const [trackPayload, artistPayload, albumPayload] = await Promise.all([
         apiRequest('user.gettoptracks', { limit: 20 }),
@@ -656,8 +672,17 @@ form.addEventListener('submit', async (event) => {
     let artists;
     let albums;
     if (bounds) {
-      if (!hasVisibleCache) traces.innerHTML = '<div class="empty-board">Reading your listening history for this custom range…</div>';
-      ({ tracks, artists, albums } = await topFromRecentHistory(apiRequest, bounds.from, limits, bounds.to));
+      const cachedSelection = selectionPreviewCache.get(`${username.toLowerCase()}\u0000${rangeSignature()}`);
+      if (cachedSelection) {
+        tracks = cachedSelection.tracks.slice(0, limits.tracks);
+        artists = cachedSelection.artists.slice(0, limits.artists);
+        albums = cachedSelection.albums.slice(0, limits.albums);
+      } else {
+        if (!hasVisibleCache) traces.innerHTML = '<div class="empty-board">Reading your listening history for this custom range…</div>';
+        ({ tracks, artists, albums } = await topFromRecentHistory(apiRequest, bounds.from, limits, bounds.to, (completed, total) => {
+          if (!hasVisibleCache) traces.innerHTML = `<div class="empty-board">Reading your listening history (${completed} of ${total} pages)…</div>`;
+        }));
+      }
     } else {
       const [payload, artistPayload, albumPayload] = await Promise.all([
         limits.tracks ? apiRequest('user.gettoptracks', { limit: limits.tracks }) : Promise.resolve({ toptracks: { track: [] } }),
