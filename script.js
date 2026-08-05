@@ -97,13 +97,12 @@ async function topFromRecentHistory(apiRequest, from, limits) {
   };
 }
 
-const draggableCardSelector = '.wiki-summary,.citation-source,.lastfm-source,.lastfm-image,.lrclib-source';
+const draggableCardSelector = '.wiki-summary,.citation-source,.lastfm-source,.lrclib-source';
 let draggedCard = null;
 
 function componentForCard(card) {
   if (card.classList.contains('wiki-summary')) return 'wiki';
   if (card.classList.contains('citation-source')) return 'citation';
-  if (card.classList.contains('lastfm-image')) return 'image';
   if (card.classList.contains('lrclib-source')) return 'lyrics';
   if (card.classList.contains('lastfm-source')) return card.classList.contains('album') ? 'album' : card.classList.contains('artist') ? 'artist' : 'track';
   return '';
@@ -134,8 +133,8 @@ function applySavedCardOrder() {
 }
 
 function prepareBoardCards() {
-  // Boards saved before RYM was removed may still contain its old cards.
-  traces.querySelectorAll('.rym-source').forEach((card) => card.remove());
+  // Boards saved before removed source types should not retain stale cards.
+  traces.querySelectorAll('.rym-source,.lastfm-image').forEach((card) => card.remove());
   [...traces.childNodes].forEach((node) => {
     if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) node.remove();
   });
@@ -176,6 +175,39 @@ traces.addEventListener('dragend', () => {
   draggedCard.classList.remove('is-dragging');
   draggedCard = null;
   saveCardOrder();
+});
+
+function resetArtworkSwipe(swipe) {
+  window.clearInterval(swipe.artworkInterval);
+  swipe.artworkInterval = undefined;
+  const images = [...swipe.querySelectorAll('img')];
+  images.forEach((image, index) => image.classList.toggle('is-active', index === 0));
+  images.forEach((image) => image.classList.remove('is-exiting'));
+  swipe.dataset.artworkIndex = '0';
+}
+
+function advanceArtworkSwipe(swipe) {
+  const images = [...swipe.querySelectorAll('img')];
+  if (images.length < 2) return;
+  const current = Number(swipe.dataset.artworkIndex || 0);
+  const next = (current + 1) % images.length;
+  images[current].classList.add('is-exiting');
+  images[next].classList.add('is-active');
+  window.setTimeout(() => images[current].classList.remove('is-active', 'is-exiting'), 360);
+  swipe.dataset.artworkIndex = String(next);
+}
+
+traces.addEventListener('pointerover', (event) => {
+  const swipe = event.target.closest('.artwork-swipe[data-artwork-count]');
+  if (!swipe || swipe.contains(event.relatedTarget) || Number(swipe.dataset.artworkCount) < 2) return;
+  window.clearInterval(swipe.artworkInterval);
+  swipe.artworkInterval = window.setInterval(() => advanceArtworkSwipe(swipe), 1700);
+});
+
+traces.addEventListener('pointerout', (event) => {
+  const swipe = event.target.closest('.artwork-swipe[data-artwork-count]');
+  if (!swipe || swipe.contains(event.relatedTarget)) return;
+  resetArtworkSwipe(swipe);
 });
 
 if (restoredBoard) prepareBoardCards();
@@ -316,9 +348,16 @@ function descriptionText(wiki) {
   return (wiki?.content || wiki?.summary || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().replace(/Read more on Last\.fm\.?$/i, '').slice(0, 800);
 }
 
+function artworkVariants(info, fallback = '') {
+  const fallbackImages = Array.isArray(fallback) ? fallback : [fallback];
+  const images = [...(Array.isArray(info?.image) ? info.image.map((entry) => entry?.['#text']) : []), ...fallbackImages]
+    .filter((image) => image && !image.includes('2a96cbd8b46e442fc41c2b86b821562f'));
+  const preferred = info?.image?.find((entry) => entry.size === 'extralarge')?.['#text'] || images[0];
+  return [...new Set([preferred, ...images].filter(Boolean))];
+}
+
 function artwork(info, fallback = '') {
-  const image = info?.image?.find((entry) => entry.size === 'extralarge')?.['#text'] || info?.image?.at(-1)?.['#text'] || fallback;
-  return image?.includes('2a96cbd8b46e442fc41c2b86b821562f') ? '' : image;
+  return artworkVariants(info, fallback)[0] || '';
 }
 
 function lastfmTrackFacts(track) {
@@ -352,20 +391,19 @@ function lastfmArtistFacts(artist, fallbackArtist = {}) {
   return `<span class="lastfm-metric"><strong>${count.toLocaleString()}</strong><small>listeners across Last.fm</small></span>`;
 }
 
-function lastfmImageCard(kind, artist, title, stat, imageUrl) {
-  if (!imageUrl) return '';
-  const href = kind === 'artist'
-    ? lastfmUrl(artist)
-    : `https://www.last.fm/music/${encodeURIComponent(artist)}/${encodeURIComponent(title)}`;
-  const label = kind === 'album' ? `${title} — ${artist}` : title;
-  return `<a class="lastfm-image ${kind}-image" data-card-id="lastfm-image-${kind}-${encodeURIComponent(`${artist}-${title}`)}" href="${href}" target="_blank" rel="noreferrer" aria-label="Open Last.fm ${kind} image for ${escapeHtml(label)}"><small class="personal-stat">${escapeHtml(stat)}</small><img class="service-logo" src="/assets/lastfm-logo.png" alt="Last.fm" /><img class="lastfm-image-art" src="${imageUrl}" alt="${escapeHtml(label)}" /><span>${escapeHtml(label)}</span><i>↗</i></a>`;
+function artworkSwipe(kind, title, imageUrls) {
+  if (!imageUrls.length) return '';
+  const images = imageUrls.slice(0, 5).map((url, index) => `<img class="${index === 0 ? 'is-active' : ''}" src="${url}" alt="" />`).join('');
+  return `<span class="${kind}-art artwork-swipe" data-artwork-count="${Math.min(imageUrls.length, 5)}" aria-label="${escapeHtml(title)} artwork">${images}</span>`;
 }
 
-function lastfmPageCard(kind, artist, title, stat, imageUrl, description = '', facts = '', titleDetail = '') {
+function lastfmPageCard(kind, artist, title, stat, imageUrls = [], description = '', facts = '', titleDetail = '') {
+  const artworkUrls = Array.isArray(imageUrls) ? imageUrls : [imageUrls].filter(Boolean);
+  const imageUrl = artworkUrls[0] || '';
   const pageUrl = kind === 'artist' ? lastfmUrl(artist) : kind === 'album' ? `https://www.last.fm/music/${encodeURIComponent(artist)}/${encodeURIComponent(title)}` : lastfmUrl(artist, title);
   const cover = imageUrl && !['album', 'artist'].includes(kind) && !description ? `<img class="lastfm-art" src="${imageUrl}" alt="" />` : '';
   const hasInlineArtwork = ['album', 'artist'].includes(kind) && imageUrl;
-  const titleMarkup = hasInlineArtwork ? `<div class="lastfm-title-row"><img class="${kind}-art" src="${imageUrl}" alt="" /><div class="lastfm-title-copy"><span>${escapeHtml(title)}</span>${kind === 'album' ? `<em>${escapeHtml(artist)}</em>` : ''}${titleDetail ? `<small class="lastfm-title-detail">${escapeHtml(titleDetail)}</small>` : ''}</div></div>` : `<span>${escapeHtml(title)}</span>`;
+  const titleMarkup = hasInlineArtwork ? `<div class="lastfm-title-row">${artworkSwipe(kind, title, artworkUrls)}<div class="lastfm-title-copy"><span>${escapeHtml(title)}</span>${kind === 'album' ? `<em>${escapeHtml(artist)}</em>` : ''}${titleDetail ? `<small class="lastfm-title-detail">${escapeHtml(titleDetail)}</small>` : ''}</div></div>` : `<span>${escapeHtml(title)}</span>`;
   const artistMarkup = kind === 'artist' || (kind === 'album' && hasInlineArtwork) ? '' : `<em>${escapeHtml(artist)}</em>`;
   const body = description ? `<p>${escapeHtml(description)}</p>` : '';
   const metrics = facts ? `<div class="lastfm-facts">${facts}</div>` : '';
@@ -445,20 +483,17 @@ form.addEventListener('submit', async (event) => {
         return profile.artist?.bio?.content || profile.artist?.bio?.summary || '';
       } }).catch(() => []);
       details = await getDetails();
-      const imageUrl = artwork(details.artist, artwork(artist, ''));
-      const lastfm = lastfmPageCard('artist', artist.name, artist.name, artistStat, imageUrl, descriptionText(details.artist?.bio), lastfmArtistFacts(details.artist, artist));
-      return [...wiki, lastfm, lastfmImageCard('artist', artist.name, artist.name, artistStat, imageUrl)];
+      const imageUrls = artworkVariants(details.artist, artworkVariants(artist));
+      const lastfm = lastfmPageCard('artist', artist.name, artist.name, artistStat, imageUrls, descriptionText(details.artist?.bio), lastfmArtistFacts(details.artist, artist));
+      return [...wiki, lastfm];
     }));
     const albumCards = await Promise.all(albums.map(async (album) => {
       const artist = album.artist?.name || album.artist;
       const albumStat = playLabel(album.playcount, period);
       const details = await apiRequest('album.getInfo', { artist, album: album.name }).catch(() => ({}));
       const albumFacts = lastfmAlbumFacts(details.album);
-      const imageUrl = artwork(details.album, artwork(album, ''));
-      return [
-        lastfmPageCard('album', artist, album.name, albumStat, imageUrl, descriptionText(details.album?.wiki), albumFacts.markup, albumFacts.length),
-        lastfmImageCard('album', artist, album.name, albumStat, imageUrl),
-      ];
+      const imageUrls = artworkVariants(details.album, artworkVariants(album));
+      return lastfmPageCard('album', artist, album.name, albumStat, imageUrls, descriptionText(details.album?.wiki), albumFacts.markup, albumFacts.length);
     }));
     const allCards = [...artistCards.flat(), ...cards.flat(), ...albumCards.flat()].filter(Boolean);
     traces.innerHTML = shuffle(allCards).join('');
