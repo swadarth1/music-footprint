@@ -526,13 +526,13 @@ function infoboxLabelFact(markup) {
   const header = [...document.querySelectorAll('.infobox th')].find((node) => /^labels?$/i.test(node.textContent.trim()));
   const cell = header?.nextElementSibling;
   const answer = [...(cell?.querySelectorAll('a') || [])].map((link) => link.textContent.trim()).find((value) => value.length > 2) || cell?.textContent.split(/[\n,;]/).map((value) => value.trim()).find(Boolean);
-  return answer && answer.length < 55 ? { type: 'label', answer } : null;
+  return answer && answer.length < 55 ? { type: 'label', answer, excerpt: `Labels: ${answer}.` } : null;
 }
 
 async function artistTriviaFacts(artist, lastfmBio = '') {
   const facts = [];
   const add = (fact, source, url, excerpt = '') => {
-    if (fact && !facts.some((item) => item.type === fact.type)) facts.push({ ...fact, source, url, excerpt });
+    if (fact && !facts.some((item) => item.type === fact.type)) facts.push({ ...fact, source, url, excerpt: fact.excerpt || excerpt });
   };
   try {
     const search = new URL('https://en.wikipedia.org/w/api.php');
@@ -564,29 +564,14 @@ function quizQuestion(fact, artist) {
 
 function quizExcerpt(fact) {
   const document = new DOMParser().parseFromString(fact.excerpt || '', 'text/html');
-  document.querySelectorAll('script,style,iframe,object,embed').forEach((node) => node.remove());
-  const containingNode = [...document.querySelectorAll('p,li,div')].find((node) => node.textContent.toLowerCase().includes(fact.answer.toLowerCase())) || document.body;
-  containingNode.querySelectorAll('*').forEach((node) => {
-    if (node.tagName === 'A') {
-      const href = node.getAttribute('href') || '';
-      if (!/^https?:\/\//i.test(href)) node.replaceWith(document.createTextNode(node.textContent));
-      else {
-        [...node.attributes].forEach((attribute) => {
-          if (attribute.name !== 'href') node.removeAttribute(attribute.name);
-        });
-        node.setAttribute('target', '_blank');
-        node.setAttribute('rel', 'noreferrer');
-      }
-    } else if (!['EM', 'I', 'B', 'STRONG', 'BR'].includes(node.tagName)) {
-      node.replaceWith(document.createTextNode(node.textContent));
-    }
-  });
-  const text = containingNode.textContent.replace(/\s+/g, ' ').trim();
-  if (!text) return '';
-  if (text.length <= 320) return containingNode.innerHTML;
+  const text = document.body.textContent.replace(/\s+/g, ' ').trim();
   const answerIndex = text.toLowerCase().indexOf(fact.answer.toLowerCase());
-  const start = Math.max(0, answerIndex - 105);
-  return `${escapeHtml(`${start ? '…' : ''}${text.slice(start, start + 315).trim()}…`)}`;
+  if (!text || answerIndex < 0) return '';
+  const sentenceStart = Math.max(0, text.slice(0, answerIndex).search(/[^.!?]*$/));
+  const afterAnswer = text.slice(answerIndex);
+  const endMatch = afterAnswer.match(/[.!?](?:\s|$)/);
+  const sentenceEnd = endMatch ? answerIndex + endMatch.index + 1 : text.length;
+  return escapeHtml(text.slice(sentenceStart, sentenceEnd).trim());
 }
 
 function artistQuizCard(fact, listeningStat, distractorAnswers) {
