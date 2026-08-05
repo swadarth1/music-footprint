@@ -533,7 +533,7 @@ async function lrclibCard(artist, track, listeningStat) {
 }
 
 function descriptionText(wiki) {
-  return (wiki?.content || wiki?.summary || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().replace(/Read more on Last\.fm\.?$/i, '').slice(0, 800);
+  return (wiki?.content || wiki?.summary || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().replace(/Read more on Last\.fm\.?$/i, '');
 }
 
 function artwork(info, fallback = '') {
