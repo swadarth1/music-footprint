@@ -571,7 +571,11 @@ function quizExcerpt(fact) {
   const afterAnswer = text.slice(answerIndex);
   const endMatch = afterAnswer.match(/[.!?](?:\s|$)/);
   const sentenceEnd = endMatch ? answerIndex + endMatch.index + 1 : text.length;
-  return escapeHtml(text.slice(sentenceStart, sentenceEnd).trim());
+  const sentence = text.slice(sentenceStart, sentenceEnd).trim();
+  const answerStart = sentence.toLowerCase().indexOf(fact.answer.toLowerCase());
+  if (answerStart < 0) return escapeHtml(sentence);
+  const answerEnd = answerStart + fact.answer.length;
+  return `${escapeHtml(sentence.slice(0, answerStart))}<strong>${escapeHtml(sentence.slice(answerStart, answerEnd))}</strong>${escapeHtml(sentence.slice(answerEnd))}`;
 }
 
 function artistQuizCard(fact, listeningStat, distractorAnswers) {
