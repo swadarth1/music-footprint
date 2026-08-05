@@ -392,7 +392,16 @@ const fallbackQuizLocations = [
 ];
 
 function cleanLocation(value) {
-  return String(value || '').replace(/<[^>]*>/g, '').replace(/\[[^\]]*\]/g, '').replace(/\s+/g, ' ').replace(/\s+in\s+\d{4}.*$/i, '').replace(/\s*(?:and|with|which|where|while)\b.*$/i, '').replace(/[;.]$/, '').trim();
+  return String(value || '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\[[^\]]*\]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+in\s+\d{4}.*$/i, '')
+    .replace(/(?:,|\s)\s*(?:formed|founded|originated|started|created|led|fronted|composed|produced|released)\b.*$/i, '')
+    .replace(/\s+by\s+[A-Z][A-Za-z .'-]*$/i, '')
+    .replace(/\s*(?:and|with|which|where|while)\b.*$/i, '')
+    .replace(/[;.]$/, '')
+    .trim();
 }
 
 function locationFactFromBio(text, artist) {
