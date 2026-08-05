@@ -31,6 +31,7 @@ function decodeHtml(value) {
 function extractArticlePreview(html) {
   const meta = html.match(/<meta[^>]+(?:name|property)=["'](?:description|og:description)["'][^>]+content=["']([^"']+)/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["'](?:description|og:description)/i);
   const title = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i)?.[1] || html.match(/<title[^>]*>([^<]+)/i)?.[1] || '';
+  const publishedAt = html.match(/<meta[^>]+(?:name|property)=["'](?:article:published_time|date|publishdate|pubdate)["'][^>]+content=["']([^"']+)/i)?.[1] || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["'](?:article:published_time|date|publishdate|pubdate)["']/i)?.[1] || '';
   const main = html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1] || html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] || html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)?.[1] || '';
   const cleanFragment = (value) => decodeHtml(value.replace(/<(script|style|nav|header|footer|aside)[^>]*>[\s\S]*?<\/\1>/gi, '').replace(/<\/(p|div|h[1-6]|li|br|blockquote)>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
   const isBoilerplate = (value) => /(?:\b(?:archive|menu|home)\b.*\b(?:archive|menu|home|reviews|features)\b|\b(?:features?|reviews?)\s+(?:album\s+)?(?:reviews?|features?)\b|what'?s the rumpus|past perfect primitive futures)/i.test(value);
@@ -39,7 +40,7 @@ function extractArticlePreview(html) {
   const text = paragraphs[0] || (metaExcerpt.length > 80 && !isBoilerplate(metaExcerpt) ? metaExcerpt : '');
   const excerpt = text.length > 80 ? text.slice(0, 360).replace(/\s+\S*$/, '').trim() : '';
   const readableExcerpt = /\.mw-parser-output|\{\s*[\w-]+\s*:|background(?:-color)?\s*:|url\s*\(|&#(?:x[0-9a-f]+|\d+);?/i.test(excerpt) ? '' : excerpt;
-  return { title: decodeHtml(title).replace(/\s+/g, ' ').trim(), excerpt: readableExcerpt };
+  return { title: decodeHtml(title).replace(/\s+/g, ' ').trim(), excerpt: readableExcerpt, publishedAt: decodeHtml(publishedAt).replace(/\s+/g, ' ').trim() };
 }
 
 function isSafeExternalUrl(value) {

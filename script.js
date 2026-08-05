@@ -393,13 +393,21 @@ async function wikipediaCard(artist, listeningStat, options = {}) {
     return decoded.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   };
   const artistTerms = [normalizeCitationText(artist), normalizeCitationText(artist).replace(/^the\s+/, '')].filter((term) => term.length > 2);
+  const citationDate = (reference) => {
+    const datetime = reference.querySelector('time[datetime]')?.getAttribute('datetime');
+    const text = datetime || reference.textContent;
+    const matched = String(text || '').match(/\b\d{4}-\d{2}-\d{2}\b|\b(?:\d{1,2}\s+)?(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:,)?\s+\d{4}\b|\b\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b/i);
+    if (!matched) return '';
+    const date = new Date(matched[0].includes('-') ? `${matched[0]}T12:00:00` : matched[0]);
+    return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
+  };
   const citations = [...article.querySelectorAll('ol.references > li')]
     .map((reference) => {
       const link = reference.querySelector('a.external');
       const referenceText = reference.textContent.replace(/\s+/g, ' ').trim();
       const quotedTitle = referenceText.match(/[“"]([^”"]{8,180})[”"]/);
       const title = quotedTitle?.[1]?.trim() || '';
-      return link && title && !/\.mw-parser-output|\{\s*[\w-]+\s*:|background(?:-color)?\s*:|url\s*\(/i.test(title) ? { url: link.href, title, referenceText } : null;
+      return link && title && !/\.mw-parser-output|\{\s*[\w-]+\s*:|background(?:-color)?\s*:|url\s*\(/i.test(title) ? { url: link.href, title, referenceText, publishedAt: citationDate(reference) } : null;
     })
     .filter(Boolean)
     .filter((citation) => citation.url.startsWith('http') && citation.title.length > 8)
@@ -421,12 +429,18 @@ async function citationCard(citation, listeningStat, artist, wikiUrl) {
   const favicon = `https://${source}/favicon.ico`;
   const title = citation.title.replace(/\s+/g, ' ').slice(0, 170);
   let excerpt = '';
+  let publishedAt = citation.publishedAt || '';
   try {
     const response = await fetch(`/api/article?${new URLSearchParams({ url: citation.url })}`);
-    if (response.ok) excerpt = (await response.json()).excerpt || '';
+    if (response.ok) {
+      const article = await response.json();
+      excerpt = article.excerpt || '';
+      publishedAt ||= article.publishedAt || '';
+    }
   } catch { /* Citation cards remain useful even when an article cannot be read. */ }
   const articleExcerpt = excerpt ? `<small class="citation-excerpt">${escapeHtml(excerpt)}</small>` : '';
-  return `<article class="citation-source" data-card-id="citation-${encodeURIComponent(citation.url)}"><a class="citation-main" href="${citation.url}" target="_blank" rel="noreferrer" aria-label="Open Wikipedia-cited source ${escapeHtml(title)}"></a><small class="personal-stat">${escapeHtml(listeningStat)}</small><div class="citation-label"><span>Wikipedia citation</span><span class="citation-brand"><img src="${favicon}" alt="" onerror="this.style.display='none'" /><b>${escapeHtml(source)}</b></span></div><p>${escapeHtml(title)}</p>${articleExcerpt}<small class="citation-origin">From <a href="${wikiUrl}" target="_blank" rel="noreferrer">${escapeHtml(artist)}</a></small><a class="citation-open" href="${citation.url}" target="_blank" rel="noreferrer" aria-label="Open citation">↗</a></article>`;
+  const dateMarkup = publishedAt ? `<time class="citation-date">${escapeHtml(publishedAt)}</time>` : '';
+  return `<article class="citation-source" data-card-id="citation-${encodeURIComponent(citation.url)}"><a class="citation-main" href="${citation.url}" target="_blank" rel="noreferrer" aria-label="Open Wikipedia-cited source ${escapeHtml(title)}"></a><small class="personal-stat">${escapeHtml(listeningStat)}</small><div class="citation-label"><span>Wikipedia citation</span><span class="citation-brand"><img src="${favicon}" alt="" onerror="this.style.display='none'" /><b>${escapeHtml(source)}</b></span></div>${dateMarkup}<p>${escapeHtml(title)}</p>${articleExcerpt}<small class="citation-origin">From <a href="${wikiUrl}" target="_blank" rel="noreferrer">${escapeHtml(artist)}</a></small><a class="citation-open" href="${citation.url}" target="_blank" rel="noreferrer" aria-label="Open citation">↗</a></article>`;
 }
 
 const fallbackQuizLocations = [
