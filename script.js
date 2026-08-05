@@ -449,11 +449,11 @@ async function citationCard(citation, listeningStat, artist, wikiUrl, articleInd
   return `<article class="citation-source" data-article-index="${articleIndex}" data-card-id="citation-${encodeURIComponent(citation.url)}"><a class="citation-main" href="${citation.url}" target="_blank" rel="noreferrer" aria-label="Open Wikipedia-cited source ${escapeHtml(title)}"></a><small class="personal-stat">${escapeHtml(listeningStat)}</small><div class="citation-label"><span>Wikipedia citation</span><span class="citation-brand"><img src="${favicon}" alt="" onerror="this.style.display='none'" /><b>${escapeHtml(source)}</b></span></div>${dateMarkup}<p>${escapeHtml(title)}</p>${articleExcerpt}<small class="citation-origin">From <a href="${wikiUrl}" target="_blank" rel="noreferrer">${escapeHtml(artist)}</a></small><a class="citation-open" href="${citation.url}" target="_blank" rel="noreferrer" aria-label="Open citation">↗</a></article>`;
 }
 
-const fallbackQuizLocations = [
-  'Austin, Texas', 'Brooklyn, New York', 'Chicago, Illinois', 'Los Angeles, California',
-  'Manchester, England', 'Montreal, Quebec', 'Nashville, Tennessee', 'Portland, Oregon',
-  'Seattle, Washington', 'Toronto, Ontario',
-];
+const fallbackQuizAnswers = {
+  location: ['Austin, Texas', 'Brooklyn, New York', 'Chicago, Illinois', 'Los Angeles, California', 'Manchester, England', 'Montreal, Quebec', 'Nashville, Tennessee', 'Portland, Oregon', 'Seattle, Washington', 'Toronto, Ontario'],
+  formationYear: ['1978', '1984', '1989', '1993', '1998', '2002', '2006', '2010'],
+  label: ['4AD', 'Domino Recording Company', 'Matador Records', 'Merge Records', 'Sub Pop', 'Warp Records'],
+};
 
 function cleanLocation(value) {
   return String(value || '')
@@ -483,12 +483,38 @@ function locationFactFromBio(text, artist) {
   for (const candidate of patterns) {
     const match = body.match(candidate.expression);
     const location = cleanLocation(match?.[1]);
-    if (location && location.length < 70 && !location.toLowerCase().includes(artist.toLowerCase())) return { location, type: candidate.type };
+    if (location && location.length < 70 && !location.toLowerCase().includes(artist.toLowerCase())) return { type: 'location', answer: location, questionType: candidate.type };
   }
   return null;
 }
 
-async function artistLocationFact(artist, lastfmBio = '') {
+function formationYearFactFromBio(text) {
+  const body = String(text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!/\b(band|group|duo|collective)\b/i.test(body)) return null;
+  const match = body.match(/\b(?:formed|founded|originated|started)\s+(?:in|from)\s+[^.]{0,85}?\s+in\s+((?:18|19|20)\d{2})\b/i) || body.match(/\b(?:formed|founded|originated|started)\s+(?:in\s+)?((?:18|19|20)\d{2})\b/i);
+  return match ? { type: 'formationYear', answer: match[1] } : null;
+}
+
+function labelFactFromBio(text) {
+  const body = String(text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const match = body.match(/\b(?:signed to|signed with|recorded for|released on)\s+(?:the\s+)?([A-Z][A-Za-z0-9&.' -]{2,55}?)(?:\s+(?:Records|Recordings|label)|[,;.])/i);
+  const answer = match?.[1]?.trim();
+  return answer && answer.length < 55 ? { type: 'label', answer } : null;
+}
+
+function infoboxLabelFact(markup) {
+  const document = new DOMParser().parseFromString(markup || '', 'text/html');
+  const header = [...document.querySelectorAll('.infobox th')].find((node) => /^labels?$/i.test(node.textContent.trim()));
+  const cell = header?.nextElementSibling;
+  const answer = [...(cell?.querySelectorAll('a') || [])].map((link) => link.textContent.trim()).find((value) => value.length > 2) || cell?.textContent.split(/[\n,;]/).map((value) => value.trim()).find(Boolean);
+  return answer && answer.length < 55 ? { type: 'label', answer } : null;
+}
+
+async function artistTriviaFacts(artist, lastfmBio = '') {
+  const facts = [];
+  const add = (fact, source, url) => {
+    if (fact && !facts.some((item) => item.type === fact.type)) facts.push({ ...fact, source, url });
+  };
   try {
     const search = new URL('https://en.wikipedia.org/w/api.php');
     search.search = new URLSearchParams({ action: 'query', list: 'search', srsearch: `${artist} band musician music`, srlimit: '8', format: 'json', origin: '*' });
@@ -496,27 +522,36 @@ async function artistLocationFact(artist, lastfmBio = '') {
     const result = selectMusicResult(searchPayload.query?.search || [], artist);
     if (result) {
       const summary = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(result.title.replaceAll(' ', '_'))}`).then((response) => response.json());
-      const fact = locationFactFromBio(summary.extract, artist);
-      if (fact) return { ...fact, source: 'Wikipedia', url: summary.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(result.title)}` };
+      const wikiUrl = summary.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(result.title)}`;
+      add(locationFactFromBio(summary.extract, artist), 'Wikipedia', wikiUrl);
+      add(formationYearFactFromBio(summary.extract), 'Wikipedia', wikiUrl);
+      const parse = new URL('https://en.wikipedia.org/w/api.php');
+      parse.search = new URLSearchParams({ action: 'parse', page: result.title, prop: 'text', format: 'json', origin: '*' });
+      const parsed = await fetch(parse).then((response) => response.json());
+      add(infoboxLabelFact(parsed.parse?.text?.['*']), 'Wikipedia', wikiUrl);
     }
   } catch { /* Last.fm remains the fallback source. */ }
-  const fallbackFact = locationFactFromBio(lastfmBio, artist);
-  return fallbackFact ? { ...fallbackFact, source: 'Last.fm', url: lastfmUrl(artist) } : null;
+  add(locationFactFromBio(lastfmBio, artist), 'Last.fm', lastfmUrl(artist));
+  add(formationYearFactFromBio(lastfmBio), 'Last.fm', lastfmUrl(artist));
+  add(labelFactFromBio(lastfmBio), 'Last.fm', lastfmUrl(artist));
+  return facts;
 }
 
 function quizQuestion(fact, artist) {
-  return fact.type === 'formation' ? `Where did ${artist} form?` : `Where is ${artist} from?`;
+  if (fact.type === 'formationYear') return `In what year did ${artist} form?`;
+  if (fact.type === 'label') return `Which label is listed for ${artist}?`;
+  return fact.questionType === 'formation' ? `Where did ${artist} form?` : `Where is ${artist} from?`;
 }
 
-function artistQuizCard(fact, listeningStat, distractorLocations) {
-  const answerKey = fact.location.toLowerCase();
-  const uniqueLocations = (locations) => [...new Set(locations.map(cleanLocation).filter((location) => location && location.toLowerCase() !== answerKey))];
-  const otherArtistLocations = uniqueLocations(distractorLocations);
-  const fallbackLocations = shuffle(uniqueLocations(fallbackQuizLocations).filter((location) => !otherArtistLocations.some((other) => other.toLowerCase() === location.toLowerCase())));
-  const choices = [...otherArtistLocations, ...fallbackLocations].slice(0, 3);
+function artistQuizCard(fact, listeningStat, distractorAnswers) {
+  const answerKey = fact.answer.toLowerCase();
+  const uniqueAnswers = (answers) => [...new Set(answers.map((answer) => String(answer || '').trim()).filter((answer) => answer && answer.toLowerCase() !== answerKey))];
+  const otherArtistAnswers = uniqueAnswers(distractorAnswers);
+  const fallbackAnswers = shuffle(uniqueAnswers(fallbackQuizAnswers[fact.type] || []).filter((answer) => !otherArtistAnswers.some((other) => other.toLowerCase() === answer.toLowerCase())));
+  const choices = [...otherArtistAnswers, ...fallbackAnswers].slice(0, 3);
   if (choices.length < 3) return '';
-  const options = shuffle([fact.location, ...choices]).map((location) => `<button class="quiz-option" type="button" data-correct="${location === fact.location}">${escapeHtml(location)}</button>`).join('');
-  return `<article class="quiz-source" data-card-id="quiz-${encodeURIComponent(fact.artist)}"><small class="personal-stat">${escapeHtml(listeningStat)}</small><span class="quiz-kicker">Artist quiz</span><p>${escapeHtml(quizQuestion(fact, fact.artist))}</p><div class="quiz-options">${options}</div><small class="quiz-feedback" aria-live="polite"></small><a class="quiz-source-link" href="${fact.url}" target="_blank" rel="noreferrer">Source: ${escapeHtml(fact.source)} ↗</a></article>`;
+  const options = shuffle([fact.answer, ...choices]).map((answer) => `<button class="quiz-option" type="button" data-correct="${answer === fact.answer}">${escapeHtml(answer)}</button>`).join('');
+  return `<article class="quiz-source" data-card-id="quiz-${fact.type}-${encodeURIComponent(fact.artist)}"><small class="personal-stat">${escapeHtml(listeningStat)}</small><span class="quiz-kicker">Artist quiz</span><p>${escapeHtml(quizQuestion(fact, fact.artist))}</p><div class="quiz-options">${options}</div><small class="quiz-feedback" aria-live="polite"></small><a class="quiz-source-link" href="${fact.url}" target="_blank" rel="noreferrer">Source: ${escapeHtml(fact.source)} ↗</a></article>`;
 }
 
 async function geniusPageUrl(artist, track) {
@@ -663,8 +698,8 @@ form.addEventListener('submit', async (event) => {
       } }).catch(() => []);
       details = await getDetails();
       const lastfm = lastfmPageCard('artist', artist.name, artist.name, artistStat, artwork(details.artist, artwork(artist, '')), descriptionText(details.artist?.bio), lastfmArtistFacts(details.artist, artist));
-      const quizFact = await artistLocationFact(artist.name, details.artist?.bio?.content || details.artist?.bio?.summary || '');
-      return { cards: [...wiki, lastfm], quizFact: quizFact ? { ...quizFact, artist: artist.name, listeningStat: artistStat } : null };
+      const quizFacts = await artistTriviaFacts(artist.name, details.artist?.bio?.content || details.artist?.bio?.summary || '');
+      return { cards: [...wiki, lastfm], quizFacts: quizFacts.map((fact) => ({ ...fact, artist: artist.name, listeningStat: artistStat })) };
     }));
     const albumCards = await Promise.all(albums.map(async (album) => {
       const artist = album.artist?.name || album.artist;
@@ -673,8 +708,8 @@ form.addEventListener('submit', async (event) => {
       const albumFacts = lastfmAlbumFacts(details.album);
       return lastfmPageCard('album', artist, album.name, albumStat, artwork(details.album, artwork(album, '')), descriptionText(details.album?.wiki), albumFacts.markup, albumFacts.length);
     }));
-    const quizFacts = artistResults.map((result) => result.quizFact).filter(Boolean);
-    const quizCards = quizFacts.map((fact) => artistQuizCard(fact, fact.listeningStat, quizFacts.filter((other) => other !== fact).map((other) => other.location))).filter(Boolean);
+    const quizFacts = artistResults.flatMap((result) => result.quizFacts);
+    const quizCards = quizFacts.map((fact) => artistQuizCard(fact, fact.listeningStat, quizFacts.filter((other) => other !== fact && other.type === fact.type).map((other) => other.answer))).filter(Boolean);
     const allCards = [...artistResults.flatMap((result) => result.cards), ...quizCards, ...cards.flat(), ...albumCards.flat()].filter(Boolean);
     traces.innerHTML = shuffle(allCards).join('');
     summary.textContent = `${tracks.length} top songs · ${albums.length} top albums · ${artists.length} top artists`;
