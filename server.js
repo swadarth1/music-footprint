@@ -89,6 +89,7 @@ http.createServer((request, response) => {
     const mbid = url.searchParams.get('mbid');
     const limit = Number(url.searchParams.get('limit') || 6);
     const from = url.searchParams.get('from');
+    const to = url.searchParams.get('to');
     const page = Number(url.searchParams.get('page') || 1);
     const isTopList = method === 'user.gettoptracks' || method === 'user.gettopartists' || method === 'user.gettopalbums';
     const isInfo = ['track.getInfo', 'album.getInfo', 'artist.getInfo'].includes(method);
@@ -101,6 +102,7 @@ http.createServer((request, response) => {
     if (mbid) query.set('mbid', mbid);
     if (method === 'user.getrecenttracks') {
       if (from) query.set('from', from);
+      if (to) query.set('to', to);
       query.set('page', String(Math.max(1, Number.isFinite(page) ? page : 1)));
       query.set('limit', String(Math.min(200, Math.max(1, Number.isFinite(limit) ? limit : 200))));
     }

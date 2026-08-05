@@ -7,23 +7,30 @@ const issue = document.querySelector('#issue');
 const visibility = document.querySelector('#board-visibility');
 const usernameInput = document.querySelector('#board-username');
 const periodInput = document.querySelector('#board-period');
+const customRange = document.querySelector('#custom-range');
+const rangeStartInput = document.querySelector('#range-start');
+const rangeEndInput = document.querySelector('#range-end');
 const selectionPreview = document.querySelector('#selection-preview');
 const selectionPreviewStatus = document.querySelector('#selection-preview-status');
 const selectionPreviewResults = document.querySelector('#selection-preview-results');
 const savedUsername = localStorage.getItem('music-footprint:lastfm-username');
 const savedPeriod = localStorage.getItem('music-footprint:lastfm-period');
+const savedCustomRange = JSON.parse(localStorage.getItem('music-footprint:custom-range') || 'null');
 const limitInputs = { tracks: document.querySelector('#limit-songs'), albums: document.querySelector('#limit-albums'), artists: document.querySelector('#limit-artists') };
 const savedLimits = JSON.parse(localStorage.getItem('music-footprint:limits') || 'null');
 const visibilityInputs = [...document.querySelectorAll('#board-visibility input[data-component]')];
 const savedVisibility = JSON.parse(localStorage.getItem('music-footprint:visible-components') || '{}');
 
 if (savedUsername) usernameInput.value = savedUsername;
-if (savedPeriod) periodInput.value = savedPeriod;
+if (savedPeriod && [...periodInput.options].some((option) => option.value === savedPeriod)) periodInput.value = savedPeriod;
+if (savedCustomRange?.start) rangeStartInput.value = savedCustomRange.start;
+if (savedCustomRange?.end) rangeEndInput.value = savedCustomRange.end;
 if (savedLimits) Object.entries(limitInputs).forEach(([key, input]) => { if (savedLimits[key] !== undefined) input.value = savedLimits[key]; });
 visibilityInputs.forEach((input) => { if (typeof savedVisibility[input.dataset.component] === 'boolean') input.checked = savedVisibility[input.dataset.component]; });
 
 const selectedLimits = () => Object.fromEntries(Object.entries(limitInputs).map(([key, input]) => [key, Math.min(20, Math.max(0, Number(input.value) || 0))]));
-const boardCacheKey = (username, period, limits) => `${username}\u0000${period}\u0000${limits.tracks}\u0000${limits.albums}\u0000${limits.artists}`;
+const rangeSignature = () => periodInput.value === 'custom' ? `custom:${rangeStartInput.value}:${rangeEndInput.value}` : periodInput.value;
+const boardCacheKey = (username, period, limits) => `${username}\u0000${period === 'custom' ? rangeSignature() : period}\u0000${limits.tracks}\u0000${limits.albums}\u0000${limits.artists}`;
 let previewTimer;
 let previewRun = 0;
 const selectionPreviewCache = new Map();
@@ -32,7 +39,8 @@ let restoredBoard = false;
 try {
   const cachedBoard = JSON.parse(localStorage.getItem('music-footprint:board') || 'null');
   const cachedLimits = cachedBoard?.limits || { tracks: 6, albums: 6, artists: 6 };
-  if (cachedBoard?.username === usernameInput.value && cachedBoard?.period === periodInput.value && JSON.stringify(cachedLimits) === JSON.stringify(selectedLimits()) && cachedBoard?.html) {
+  const matchingCustomRange = cachedBoard?.period !== 'custom' || cachedBoard?.rangeSignature === rangeSignature();
+  if (cachedBoard?.username === usernameInput.value && cachedBoard?.period === periodInput.value && matchingCustomRange && JSON.stringify(cachedLimits) === JSON.stringify(selectedLimits()) && cachedBoard?.html) {
     setup.hidden = true;
     meta.hidden = false;
     visibility.hidden = false;
@@ -61,21 +69,32 @@ const shuffle = (items) => {
   return shuffled;
 };
 
-function customRangeStart(period) {
+function rangeBounds(period) {
   const now = new Date();
-  if (period === 'ytd') return Math.floor(new Date(now.getFullYear(), 0, 1).getTime() / 1000);
-  if (period === '5year') return Math.floor(new Date(now.getFullYear() - 5, now.getMonth(), now.getDate()).getTime() / 1000);
-  return null;
+  if (period === 'ytd') return { from: Math.floor(new Date(now.getFullYear(), 0, 1).getTime() / 1000) };
+  if (period === '5year') return { from: Math.floor(new Date(now.getFullYear() - 5, now.getMonth(), now.getDate()).getTime() / 1000) };
+  if (period !== 'custom') return null;
+  const toTimestamp = (value, endOfDay = false) => {
+    const [year, month, day] = value.split('-').map(Number);
+    return Math.floor(new Date(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0).getTime() / 1000);
+  };
+  if (!rangeStartInput.value || !rangeEndInput.value) throw new Error('Choose both custom range dates.');
+  const from = toTimestamp(rangeStartInput.value);
+  const to = toTimestamp(rangeEndInput.value, true);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) throw new Error('Choose a valid custom date range.');
+  return { from, to };
 }
 
-async function topFromRecentHistory(apiRequest, from, limits) {
+async function topFromRecentHistory(apiRequest, from, limits, to) {
   const trackCounts = new Map();
   const artistCounts = new Map();
   const albumCounts = new Map();
   let page = 1;
   let totalPages = 1;
   do {
-    const payload = await apiRequest('user.getrecenttracks', { from, page, limit: 200 });
+    const parameters = { from, page, limit: 200 };
+    if (to) parameters.to = to;
+    const payload = await apiRequest('user.getrecenttracks', parameters);
     if (payload.error) throw new Error(payload.message || 'Last.fm could not read this listening range.');
     const entries = payload.recenttracks?.track || [];
     entries.filter((entry) => !entry['@attr']?.nowplaying).forEach((entry) => {
@@ -111,6 +130,31 @@ function setSelectorAvailability() {
   }
 }
 
+function dateValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function syncCustomRangeControls() {
+  const isCustom = periodInput.value === 'custom';
+  customRange.hidden = !isCustom;
+  rangeStartInput.disabled = !isCustom;
+  rangeEndInput.disabled = !isCustom;
+  if (!isCustom) return;
+  const today = new Date();
+  const todayValue = dateValue(today);
+  rangeStartInput.max = todayValue;
+  rangeEndInput.max = todayValue;
+  if (!rangeEndInput.value) rangeEndInput.value = todayValue;
+  if (!rangeStartInput.value) {
+    const monthAgo = new Date(today);
+    monthAgo.setMonth(monthAgo.getMonth() - 1);
+    rangeStartInput.value = dateValue(monthAgo);
+  }
+}
+
 function selectionPreviewMarkup(title, items, formatter) {
   const entries = items.length ? items.map(formatter).map((item) => `<li>${escapeHtml(item)}</li>`).join('') : '<li>None selected</li>';
   return `<div class="selection-preview-column"><b>${title}</b><ol>${entries}</ol></div>`;
@@ -132,7 +176,7 @@ async function refreshSelectionPreview() {
   const run = ++previewRun;
   setSelectorAvailability();
   if (!username) return;
-  const cacheKey = `${username.toLowerCase()}\u0000${period}`;
+  const cacheKey = `${username.toLowerCase()}\u0000${rangeSignature()}`;
   const cachedSelection = selectionPreviewCache.get(cacheKey);
   if (cachedSelection) return renderSelectionPreview(cachedSelection, limits);
   selectionPreviewStatus.textContent = 'Loading your top 20 songs, albums, and artists…';
@@ -145,12 +189,12 @@ async function refreshSelectionPreview() {
     return payload;
   };
   try {
-    const from = customRangeStart(period);
+    const bounds = rangeBounds(period);
     let tracks;
     let artists;
     let albums;
-    if (from) {
-      ({ tracks, artists, albums } = await topFromRecentHistory(apiRequest, from, { tracks: 20, albums: 20, artists: 20 }));
+    if (bounds) {
+      ({ tracks, artists, albums } = await topFromRecentHistory(apiRequest, bounds.from, { tracks: 20, albums: 20, artists: 20 }, bounds.to));
     } else {
       const [trackPayload, artistPayload, albumPayload] = await Promise.all([
         apiRequest('user.gettoptracks', { limit: 20 }),
@@ -526,7 +570,7 @@ function lastfmPageCard(kind, artist, title, stat, imageUrl, description = '', f
 }
 
 function cacheCurrentBoard(username, period, limits) {
-  localStorage.setItem('music-footprint:board', JSON.stringify({ username, period, limits, summary: summary.textContent, html: traces.innerHTML }));
+  localStorage.setItem('music-footprint:board', JSON.stringify({ username, period, rangeSignature: rangeSignature(), limits, summary: summary.textContent, html: traces.innerHTML }));
 }
 
 form.addEventListener('submit', async (event) => {
@@ -545,19 +589,20 @@ form.addEventListener('submit', async (event) => {
     localStorage.setItem('music-footprint:lastfm-username', username);
     localStorage.setItem('music-footprint:lastfm-period', period);
     localStorage.setItem('music-footprint:limits', JSON.stringify(limits));
+    localStorage.setItem('music-footprint:custom-range', JSON.stringify({ start: rangeStartInput.value, end: rangeEndInput.value }));
     const apiRequest = async (method, parameters = {}) => {
       const response = await fetch(`/api/lastfm?${new URLSearchParams({ method, user: username, period, ...parameters })}`);
       const type = response.headers.get('content-type') || '';
       if (!type.includes('application/json')) throw new Error('The private Last.fm server is not running. Start the app with “node server.js”, then open http://127.0.0.1:4175.');
       return response.json();
     };
-    const from = customRangeStart(period);
+    const bounds = rangeBounds(period);
     let tracks;
     let artists;
     let albums;
-    if (from) {
+    if (bounds) {
       if (!hasVisibleCache) traces.innerHTML = '<div class="empty-board">Reading your listening history for this custom range…</div>';
-      ({ tracks, artists, albums } = await topFromRecentHistory(apiRequest, from, limits));
+      ({ tracks, artists, albums } = await topFromRecentHistory(apiRequest, bounds.from, limits, bounds.to));
     } else {
       const [payload, artistPayload, albumPayload] = await Promise.all([
         limits.tracks ? apiRequest('user.gettoptracks', { limit: limits.tracks }) : Promise.resolve({ toptracks: { track: [] } }),
@@ -644,7 +689,15 @@ usernameInput.addEventListener('input', () => {
   scheduleSelectionPreview();
 });
 
-periodInput.addEventListener('change', scheduleSelectionPreview);
+periodInput.addEventListener('change', () => {
+  syncCustomRangeControls();
+  scheduleSelectionPreview();
+});
+
+[rangeStartInput, rangeEndInput].forEach((input) => input.addEventListener('change', () => {
+  localStorage.setItem('music-footprint:custom-range', JSON.stringify({ start: rangeStartInput.value, end: rangeEndInput.value }));
+  scheduleSelectionPreview();
+}));
 
 visibilityInputs.forEach((input) => input.addEventListener('change', () => {
   localStorage.setItem('music-footprint:visible-components', JSON.stringify(Object.fromEntries(visibilityInputs.map((control) => [control.dataset.component, control.checked]))));
@@ -652,5 +705,6 @@ visibilityInputs.forEach((input) => input.addEventListener('change', () => {
 }));
 
 if (restoredBoard) window.setTimeout(() => form.requestSubmit(), 0);
+syncCustomRangeControls();
 setSelectorAvailability();
 if (usernameInput.value.trim() && !restoredBoard) scheduleSelectionPreview();
