@@ -182,8 +182,8 @@ function selectionPreviewMarkup(title, items, formatter) {
 function renderSelectionPreview(selection, limits) {
   selectionPreviewStatus.textContent = '';
   selectionPreviewResults.innerHTML = [
-    selectionPreviewMarkup('Songs', selection.tracks.slice(0, limits.tracks), (track) => `${track.name} — ${track.artist?.name || track.artist}`),
-    selectionPreviewMarkup('Albums', selection.albums.slice(0, limits.albums), (album) => `${album.name} — ${album.artist?.name || album.artist}`),
+    selectionPreviewMarkup('Songs', selection.tracks.slice(0, limits.tracks), (track) => `${track.name} · ${track.artist?.name || track.artist}`),
+    selectionPreviewMarkup('Albums', selection.albums.slice(0, limits.albums), (album) => `${album.name} · ${album.artist?.name || album.artist}`),
     selectionPreviewMarkup('Artists', selection.artists.slice(0, limits.artists), (artist) => artist.name),
   ].join('');
 }
