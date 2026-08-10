@@ -282,6 +282,8 @@ function applySavedCardOrder() {
 function prepareBoardCards() {
   // Boards saved before RYM was removed may still contain its old cards.
   traces.querySelectorAll('.rym-source').forEach((card) => card.remove());
+  // MusicBrainz remains a name-disambiguation helper, but is no longer a visible media source.
+  traces.querySelectorAll('.media-source[data-media-source="MusicBrainz"]').forEach((card) => card.remove());
   [...traces.childNodes].forEach((node) => {
     if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) node.remove();
   });
@@ -613,7 +615,6 @@ async function lrclibCard(artist, track, listeningStat) {
 
 const mediaSourceDetails = {
   Wikipedia: { logo: 'https://en.wikipedia.org/static/favicon/wikipedia.ico', label: 'Wikipedia' },
-  MusicBrainz: { logo: 'https://musicbrainz.org/favicon.ico', label: 'MusicBrainz' },
   Discogs: { logo: 'https://www.discogs.com/favicon.ico', label: 'Discogs' },
 };
 
@@ -630,7 +631,7 @@ async function mediaAssociationCards(artist, entity, kind, listeningStat) {
   }).slice(0, 3).map((association) => {
     const source = mediaSourceDetails[association.source] || { logo: '', label: association.source };
     const logo = source.logo ? `<img class="media-logo" src="${source.logo}" alt="" onerror="this.style.display='none'" />` : '';
-    return `<a class="media-source" data-card-id="media-${encodeURIComponent(`${kind}-${artist}-${entity}-${association.source}-${association.title}`)}" href="${association.url}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(association.source)} media association"><small class="personal-stat">${escapeHtml(listeningStat)}</small><span class="media-type">${escapeHtml(association.kind)}</span><span class="media-brand">${logo}<b>${escapeHtml(source.label)}</b></span><p>${escapeHtml(association.title)}</p><q>${escapeHtml(association.excerpt)}</q><span class="media-origin">${escapeHtml(entity)} · ${escapeHtml(artist)}</span><i>↗</i></a>`;
+    return `<a class="media-source" data-media-source="${escapeHtml(source.label)}" data-card-id="media-${encodeURIComponent(`${kind}-${artist}-${entity}-${association.source}-${association.title}`)}" href="${association.url}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(association.source)} media association"><small class="personal-stat">${escapeHtml(listeningStat)}</small><span class="media-type">${escapeHtml(association.kind)}</span><span class="media-brand">${logo}<b>${escapeHtml(source.label)}</b></span><p>${escapeHtml(association.title)}</p><q>${escapeHtml(association.excerpt)}</q><span class="media-origin">${escapeHtml(entity)} · ${escapeHtml(artist)}</span><i>↗</i></a>`;
   });
 }
 

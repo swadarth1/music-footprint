@@ -101,30 +101,10 @@ function fetchJson(target, headers = {}) {
   });
 }
 
-let nextMusicBrainzRequestAt = 0;
 const mediaAssociationCache = new Map();
 
-function wait(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-async function fetchMusicBrainzJson(target, attempt = 0) {
-  const scheduledAt = Math.max(Date.now(), nextMusicBrainzRequestAt);
-  nextMusicBrainzRequestAt = scheduledAt + 1100;
-  if (scheduledAt > Date.now()) await wait(scheduledAt - Date.now());
-  try {
-    return await fetchJson(target, { 'User-Agent': 'MusicFootprint/1.0 (contact: local-listening-board)' });
-  } catch (error) {
-    if (/503/.test(error.message) && attempt < 1) {
-      await wait(2500);
-      return fetchMusicBrainzJson(target, attempt + 1);
-    }
-    throw error;
-  }
-}
-
-const mediaKeywords = /\b(?:featured|appeared|used|heard|included|soundtrack|theme song|theme music|score|film|movie|television|TV series|video game|game)\b/i;
 const directPlacementKeywords = /\b(?:featured|appeared|used|heard|included)\b[^.]{0,100}\b(?:film|movie|television|TV|series|episode|game|soundtrack)\b|\b(?:film|movie|television|TV|series|episode|game)\b[^.]{0,100}\b(?:featured|appeared|used|heard|included)\b/i;
+const soundtrackPlacementKeywords = /\b(?:soundtrack|theme song|theme music|original score)\b/i;
 
 function plainText(value) {
   return decodeHtml(String(value || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
@@ -133,7 +113,7 @@ function plainText(value) {
 function mediaSentence(value) {
   const text = plainText(value);
   const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
-  return sentences.find((sentence) => mediaKeywords.test(sentence))?.trim() || '';
+  return sentences.find((sentence) => directPlacementKeywords.test(sentence) || soundtrackPlacementKeywords.test(sentence))?.trim() || '';
 }
 
 function soundtrackLike(value) {
@@ -141,45 +121,49 @@ function soundtrackLike(value) {
 }
 
 async function wikipediaMediaAssociation(artist, entity, kind) {
+  const wikipediaHeaders = { 'User-Agent': 'MusicFootprint/1.0 (local listening board)' };
   const search = new URL('https://en.wikipedia.org/w/api.php');
-  search.search = new URLSearchParams({ action: 'query', list: 'search', srsearch: `${entity} ${artist} music`, srlimit: '5', format: 'json', origin: '*' });
-  const found = await fetchJson(search);
+  search.search = new URLSearchParams({ action: 'query', list: 'search', srsearch: `${entity} ${artist}`, srlimit: '8', format: 'json', origin: '*' });
+  const found = await fetchJson(search, wikipediaHeaders);
   const candidates = found.query?.search || [];
-  const normalizedEntity = entity.toLowerCase();
-  const candidate = candidates.find((item) => item.title.toLowerCase().includes(normalizedEntity)) || candidates[0];
-  if (!candidate) return null;
-  const extract = new URL('https://en.wikipedia.org/w/api.php');
-  extract.search = new URLSearchParams({ action: 'query', prop: 'extracts', explaintext: '1', titles: candidate.title, format: 'json', origin: '*' });
-  const page = await fetchJson(extract);
-  const content = Object.values(page.query?.pages || {})[0]?.extract || candidate.snippet || '';
-  const sentence = mediaSentence(content);
-  if (!sentence) return null;
-  const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(candidate.title.replaceAll(' ', '_'))}`;
-  return { source: 'Wikipedia', kind: directPlacementKeywords.test(sentence) ? 'Featured in screen media' : kind === 'artist' ? 'Screen-music association' : 'Soundtrack association', title: candidate.title, excerpt: sentence, url };
-}
+  const normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const normalizedEntity = normalize(entity);
+  const normalizedArtist = normalize(artist);
+  const rankedCandidates = [...candidates].sort((a, b) => {
+    const score = (item) => {
+      const title = normalize(item.title);
+      const snippet = normalize(item.snippet);
+      if (title === normalizedEntity) return 0;
+      if (title.includes(normalizedEntity)) return 1;
+      if (snippet.includes(normalizedEntity) && snippet.includes(normalizedArtist)) return 2;
+      return 3;
+    };
+    return score(a) - score(b);
+  });
 
-async function musicBrainzMediaAssociation(artist, entity, kind) {
-  if (kind === 'artist') return null;
-  const type = kind === 'album' ? 'release-group' : 'recording';
-  const field = kind === 'album' ? 'releasegroup' : 'recording';
-  const search = new URL(`https://musicbrainz.org/ws/2/${type}`);
-  search.search = new URLSearchParams({ fmt: 'json', limit: '5', query: `${field}:"${entity}" AND artist:"${artist}"` });
-  const matches = await fetchMusicBrainzJson(search);
-  const entries = matches[kind === 'album' ? 'release-groups' : 'recordings'] || [];
-  const exact = entries.find((entry) => entry.title?.toLowerCase() === entity.toLowerCase()) || entries[0];
-  if (!exact) return null;
-  const lookup = await fetchMusicBrainzJson(`https://musicbrainz.org/ws/2/${type}/${encodeURIComponent(exact.id)}?fmt=json&inc=releases`);
-  const release = (lookup.releases || []).find((item) => soundtrackLike(item.title));
-  if (!release) return null;
-  return { source: 'MusicBrainz', kind: 'Official soundtrack release', title: release.title, excerpt: `${entity} is listed on the official soundtrack release ${release.title}.`, url: `https://musicbrainz.org/release/${release.id}` };
+  const results = await Promise.allSettled(rankedCandidates.slice(0, 4).map(async (candidate) => {
+    const extract = new URL('https://en.wikipedia.org/w/api.php');
+    extract.search = new URLSearchParams({ action: 'query', prop: 'extracts', explaintext: '1', titles: candidate.title, format: 'json', origin: '*' });
+    const page = await fetchJson(extract, wikipediaHeaders);
+    const content = Object.values(page.query?.pages || {})[0]?.extract || candidate.snippet || '';
+    const sentence = mediaSentence(content);
+    if (!sentence) return null;
+    const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(candidate.title.replaceAll(' ', '_'))}`;
+    return { source: 'Wikipedia', kind: directPlacementKeywords.test(sentence) ? 'Featured in screen media' : kind === 'artist' ? 'Screen-music association' : 'Soundtrack association', title: candidate.title, excerpt: sentence, url };
+  }));
+  return results.find((result) => result.status === 'fulfilled' && result.value)?.value || null;
 }
 
 async function discogsMediaAssociation(artist, album) {
   if (!album) return null;
+  const normalizedAlbum = String(album).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const search = new URL('https://api.discogs.com/database/search');
-  search.search = new URLSearchParams({ artist, release_title: album, type: 'release', per_page: '10' });
+  search.search = new URLSearchParams({ q: album, artist, type: 'release', per_page: '20' });
   const result = await fetchJson(search, { 'User-Agent': 'MusicFootprint/1.0 (local listening board)' });
-  const release = (result.results || []).find((item) => soundtrackLike(item.title));
+  const release = (result.results || []).find((item) => {
+    const normalizedTitle = String(item.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    return normalizedTitle.includes(normalizedAlbum) && soundtrackLike(item.title) && !item.formats?.some((format) => format.descriptions?.includes('Unofficial Release'));
+  });
   if (!release) return null;
   return { source: 'Discogs', kind: 'Soundtrack release', title: release.title, excerpt: `${album} is catalogued as a soundtrack-related release.`, url: `https://www.discogs.com${release.uri || `/release/${release.id}`}` };
 }
@@ -244,7 +228,6 @@ http.createServer((request, response) => {
     if (cached && Date.now() - cached.createdAt < 1000 * 60 * 60 * 12) return send(response, 200, JSON.stringify(cached.payload));
     Promise.allSettled([
       wikipediaMediaAssociation(artist, entity, kind),
-      musicBrainzMediaAssociation(artist, entity, kind),
       kind === 'album' ? discogsMediaAssociation(artist, entity) : Promise.resolve(null),
     ]).then((results) => {
       const associations = results.map((result) => result.status === 'fulfilled' ? result.value : null).filter(Boolean);
