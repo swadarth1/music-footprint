@@ -632,7 +632,11 @@ const mediaSourceDetails = {
 
 function wikipediaFormattedExcerpt(text, links = []) {
   const normalizedLinks = links.map((link) => typeof link === 'string' ? { label: link, title: link } : link).filter((link) => link?.label && link?.title);
-  const uniqueLinks = [...new Map(normalizedLinks.filter((link) => link.label.length > 1 && text.toLowerCase().includes(link.label.toLowerCase())).map((link) => [link.label.toLowerCase(), link])).values()].sort((a, b) => b.label.length - a.label.length);
+  const linksByLabel = new Map();
+  normalizedLinks.filter((link) => link.label.length > 1 && text.toLowerCase().includes(link.label.toLowerCase())).forEach((link) => {
+    if (!linksByLabel.has(link.label.toLowerCase())) linksByLabel.set(link.label.toLowerCase(), link);
+  });
+  const uniqueLinks = [...linksByLabel.values()].sort((a, b) => b.label.length - a.label.length);
   if (!uniqueLinks.length) return escapeHtml(text);
   const pattern = new RegExp(`(${uniqueLinks.map((link) => link.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
   const lookup = new Map(uniqueLinks.map((link) => [link.label.toLowerCase(), link.title]));

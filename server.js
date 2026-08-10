@@ -147,11 +147,14 @@ function mediaSentences(value, limit = 3) {
 }
 
 async function wikipediaPageLinks(title, headers) {
-  const linksUrl = new URL('https://en.wikipedia.org/w/api.php');
-  linksUrl.search = new URLSearchParams({ action: 'query', prop: 'links', titles: title, plnamespace: '0', pllimit: '500', format: 'json', origin: '*' });
-  const payload = await fetchJson(linksUrl, headers);
-  const page = Object.values(payload.query?.pages || {})[0];
-  return (page?.links || []).map((link) => link.title).filter(Boolean);
+  const parseUrl = new URL('https://en.wikipedia.org/w/api.php');
+  parseUrl.search = new URLSearchParams({ action: 'parse', page: title, prop: 'text', format: 'json', origin: '*' });
+  const payload = await fetchJson(parseUrl, headers);
+  const markup = payload.parse?.text?.['*'] || '';
+  const links = [...markup.matchAll(/<a\b[^>]*\bhref=["'](?:\.\/|\/wiki\/)([^"'#?]+)[^>]*>([\s\S]*?)<\/a>/gi)]
+    .map((match) => ({ title: decodeHtml(decodeURIComponent(match[1])).replaceAll('_', ' '), label: plainText(match[2]) }))
+    .filter((link) => link.title && link.label && /[A-Z0-9]/.test(link.label) && !/^(?:edit|citation needed|first|second|third|fourth|album|soundtrack|film|movie|song|music|series|season|episode|video game)$/i.test(link.label));
+  return [...new Map(links.map((link) => [`${link.label}\u0000${link.title}`, link])).values()];
 }
 
 function soundtrackLike(value) {
@@ -197,21 +200,22 @@ async function wikipediaMediaAssociation(artist, entity, kind) {
     return score(a) - score(b);
   });
 
-  const results = await Promise.allSettled(rankedCandidates.slice(0, 5).map(async (candidate) => {
+  for (const candidate of rankedCandidates.slice(0, 3)) {
+    try {
     const extract = new URL('https://en.wikipedia.org/w/api.php');
     extract.search = new URLSearchParams({ action: 'query', prop: 'extracts', explaintext: '1', titles: candidate.title, format: 'json', origin: '*' });
     const page = await fetchJson(extract, wikipediaHeaders);
     const content = Object.values(page.query?.pages || {})[0]?.extract || candidate.snippet || '';
     const sentences = mediaSentences(content);
-    if (!sentences.length) return [];
+    if (!sentences.length) continue;
     const pageLinks = await wikipediaPageLinks(candidate.title, wikipediaHeaders).catch(() => []);
     const excerptLinks = sentences.map((sentence) => pageLinks
-      .map((title) => ({ title, label: title.replace(/\s*\([^)]*\)$/, '') }))
       .filter((link) => link.label.length > 1 && sentence.toLowerCase().includes(link.label.toLowerCase())));
     const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(candidate.title.replaceAll(' ', '_'))}`;
     return [{ source: 'Wikipedia', kind: directPlacementKeywords.test(sentences[0]) ? 'Featured in screen media' : kind === 'artist' ? 'Screen-music association' : 'Soundtrack association', title: candidate.title, excerpt: sentences.join('\n'), excerpts: sentences, excerptLinks, url }];
-  }));
-  return results.find((result) => result.status === 'fulfilled' && result.value?.length)?.value || [];
+    } catch { /* Try the next music-relevant page candidate. */ }
+  }
+  return [];
 }
 
 async function discogsMediaAssociation(artist, album) {
@@ -293,7 +297,8 @@ http.createServer((request, response) => {
       const associations = results.flatMap((result) => result.status === 'fulfilled' ? Array.isArray(result.value) ? result.value : result.value ? [result.value] : [] : []);
       const payload = { associations };
       // Empty results are often transient upstream failures; do not make them persist for 12 hours.
-      if (associations.length) mediaAssociationCache.set(cacheKey, { createdAt: Date.now(), payload });
+      const linksResolved = associations.every((association) => association.source !== 'Wikipedia' || association.excerptLinks?.some((links) => links.length));
+      if (associations.length && linksResolved) mediaAssociationCache.set(cacheKey, { createdAt: Date.now(), payload });
       send(response, 200, JSON.stringify(payload));
     }).catch(() => send(response, 200, JSON.stringify({ associations: [] })));
     return;
