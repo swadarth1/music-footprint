@@ -494,10 +494,17 @@ function cleanLocation(value) {
     .replace(/\s+/g, ' ')
     .replace(/\s+in\s+\d{4}.*$/i, '')
     .replace(/(?:,|\s)\s*(?:formed|founded|originated|started|created|led|fronted|composed|produced|released)\b.*$/i, '')
-    .replace(/\s+by\s+[A-Z][A-Za-z .'-]*$/i, '')
+    .replace(/(?:,|\s+)\s*by\b.*$/i, '')
     .replace(/\s*(?:and|with|which|where|while)\b.*$/i, '')
-    .replace(/[;.]$/, '')
+    .replace(/[;,.:]+$/, '')
     .trim();
+}
+
+function validLocationAnswer(value, artist) {
+  const answer = String(value || '').trim();
+  if (!answer || answer.length > 64 || /\d|\b(?:formed|founded|members?|band|group|duo|collective|the\s+\d{4}s)\b/i.test(answer)) return false;
+  if (/(?:\bby\b|\bwho\b|\bwhich\b|\bwhere\b|\bwhile\b)/i.test(answer)) return false;
+  return !answer.toLowerCase().includes(String(artist || '').toLowerCase());
 }
 
 function locationFactFromBio(text, artist) {
@@ -515,7 +522,7 @@ function locationFactFromBio(text, artist) {
   for (const candidate of patterns) {
     const match = body.match(candidate.expression);
     const location = cleanLocation(match?.[1]);
-    if (location && location.length < 70 && !location.toLowerCase().includes(artist.toLowerCase())) return { type: 'location', answer: location, questionType: candidate.type };
+    if (validLocationAnswer(location, artist)) return { type: 'location', answer: location, questionType: candidate.type };
   }
   return null;
 }
@@ -523,27 +530,36 @@ function locationFactFromBio(text, artist) {
 function formationYearFactFromBio(text) {
   const body = String(text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   if (!/\b(band|group|duo|collective)\b/i.test(body)) return null;
-  const match = body.match(/\b(?:formed|founded|originated|started)\s+(?:in|from)\s+[^.]{0,85}?\s+in\s+((?:18|19|20)\d{2})\b/i) || body.match(/\b(?:formed|founded|originated|started)\s+(?:in\s+)?((?:18|19|20)\d{2})\b/i);
+  const formationSentence = body.split(/(?<=[.!?])\s+/).find((sentence) => /\b(?:formed|founded|originated|started)\b/i.test(sentence) && /\b(?:band|group|duo|collective)\b/i.test(sentence)) || '';
+  const match = formationSentence.match(/\b(?:formed|founded|originated|started)\s+(?:in|from)\s+[^.]{0,85}?\s+in\s+((?:18|19|20)\d{2})\b/i) || formationSentence.match(/\b(?:formed|founded|originated|started)\s+(?:in\s+)?((?:18|19|20)\d{2})\b/i);
   return match ? { type: 'formationYear', answer: match[1] } : null;
+}
+
+function validLabelAnswer(value) {
+  const answer = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!answer || answer.length > 55 || /^[\[({]/.test(answer) || !/[A-Za-z]/.test(answer)) return '';
+  if (/\b(?:january|february|march|april|may|june|july|august|september|october|november|december|\d{4}|bandcamp|advertisements?|campaigns?|playing|dates?|american|canadian|british|english|german|french|japanese|australian)\b/i.test(answer)) return '';
+  if (answer[0] !== answer[0].toUpperCase()) return '';
+  return answer;
 }
 
 function labelFactFromBio(text) {
   const body = String(text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   const patterns = [
-    /\b(?:released|issued)\b[^.]{0,120}?\b(?:through|via|by)\s+(?:the\s+)?([A-Z][A-Za-z0-9&.' -]{2,55}?)(?:[,;.])/i,
-    /\b(?:signed to|signed with|recorded for)\s+(?:the\s+)?([A-Z][A-Za-z0-9&.' -]{2,55}?)(?:\s+(?:Records|Recordings|label)\b|[,;.])/i,
-    /\b(?:released|issued)\s+on\s+(?:the\s+)?([A-Z][A-Za-z0-9&.' -]{2,55}?(?:Records|Recordings|label))\b/i,
+    /\b(?:signed to|signed with|recorded for)\s+(?:the\s+)?([^,;.]{2,55}?)(?:\s+(?:Records|Recordings|label)\b|[,;.])/i,
+    /\b(?:released|issued)\s+on\s+(?:the\s+)?([^,;.]{2,55}?(?:Records|Recordings|label))\b/i,
   ];
-  const answer = patterns.map((pattern) => body.match(pattern)?.[1]?.trim()).find((value) => value && !/\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b|\b(?:18|19|20)\d{2}\b/i.test(value));
-  return answer && answer.length < 55 ? { type: 'label', answer } : null;
+  const answer = patterns.map((pattern) => validLabelAnswer(body.match(pattern)?.[1])).find(Boolean);
+  return answer ? { type: 'label', answer } : null;
 }
 
 function infoboxLabelFact(markup) {
   const document = new DOMParser().parseFromString(markup || '', 'text/html');
   const header = [...document.querySelectorAll('.infobox th')].find((node) => /^labels?$/i.test(node.textContent.trim()));
   const cell = header?.nextElementSibling;
-  const answer = [...(cell?.querySelectorAll('a') || [])].map((link) => link.textContent.trim()).find((value) => value.length > 2) || cell?.textContent.split(/[\n,;]/).map((value) => value.trim()).find(Boolean);
-  return answer && answer.length < 55 ? { type: 'label', answer, excerpt: `Labels: ${answer}.` } : null;
+  const candidates = [...(cell?.querySelectorAll('a') || [])].flatMap((link) => [link.getAttribute('title'), link.textContent.trim()]).concat(cell?.textContent.split(/[\n,;]/).map((value) => value.trim()) || []);
+  const answer = candidates.map(validLabelAnswer).find(Boolean);
+  return answer ? { type: 'label', answer, excerpt: `Labels: ${answer}.` } : null;
 }
 
 async function artistTriviaFacts(artist, lastfmBio = '', mbid = '') {
