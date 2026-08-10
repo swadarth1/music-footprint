@@ -379,6 +379,15 @@ async function musicIdentity(artist, mbid, bio = '') {
   return identity;
 }
 
+async function explicitGroupWikipediaResult(artist) {
+  const lookup = new URL('https://en.wikipedia.org/w/api.php');
+  lookup.search = new URLSearchParams({ action: 'query', titles: `${artist} (band)|${artist} (group)|${artist} (music group)`, redirects: '1', format: 'json', origin: '*' });
+  const payload = await fetch(lookup).then((response) => response.json());
+  const pages = Object.values(payload.query?.pages || {});
+  const page = pages.find((item) => !item.missing && /\((?:band|group|music group)\)$/i.test(item.title || ''));
+  return page ? { title: page.title, snippet: '' } : null;
+}
+
 async function wikipediaCard(artist, listeningStat, options = {}) {
   const search = new URL('https://en.wikipedia.org/w/api.php');
   search.search = new URLSearchParams({ action: 'query', list: 'search', srsearch: `${artist} band musician music`, srlimit: '8', format: 'json', origin: '*' });
@@ -386,11 +395,12 @@ async function wikipediaCard(artist, listeningStat, options = {}) {
   const results = searchPayload.query?.search || [];
   const ambiguous = musicNameMatches(results, artist).length > 1;
   let identity = { type: '' };
-  if (ambiguous) {
-    const bio = options.getBio ? await options.getBio() : '';
+  const bio = options.getBio ? await options.getBio() : '';
+  if (options.mbid || ambiguous || /\b(band|group|duo|collective)\b/i.test(bio)) {
     identity = await musicIdentity(artist, options.mbid, bio);
   }
-  const result = selectMusicResult(results, artist, identity.type);
+  const exactGroupResult = identity.type === 'Group' ? await explicitGroupWikipediaResult(artist).catch(() => null) : null;
+  const result = exactGroupResult || selectMusicResult(results, artist, identity.type);
   if (!result) throw new Error(`No music-related Wikipedia result for ${artist}.`);
   const title = result.title.replaceAll(' ', '_');
   const summaryUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
@@ -532,7 +542,7 @@ function infoboxLabelFact(markup) {
   return answer && answer.length < 55 ? { type: 'label', answer, excerpt: `Labels: ${answer}.` } : null;
 }
 
-async function artistTriviaFacts(artist, lastfmBio = '') {
+async function artistTriviaFacts(artist, lastfmBio = '', mbid = '') {
   const facts = [];
   const add = (fact, source, url, excerpt = '') => {
     if (fact && !facts.some((item) => item.type === fact.type)) facts.push({ ...fact, source, url, excerpt: fact.excerpt || excerpt });
@@ -541,7 +551,9 @@ async function artistTriviaFacts(artist, lastfmBio = '') {
     const search = new URL('https://en.wikipedia.org/w/api.php');
     search.search = new URLSearchParams({ action: 'query', list: 'search', srsearch: `${artist} band musician music`, srlimit: '8', format: 'json', origin: '*' });
     const searchPayload = await fetch(search).then((response) => response.json());
-    const result = selectMusicResult(searchPayload.query?.search || [], artist);
+    const identity = await musicIdentity(artist, mbid, lastfmBio);
+    const exactGroupResult = identity.type === 'Group' ? await explicitGroupWikipediaResult(artist).catch(() => null) : null;
+    const result = exactGroupResult || selectMusicResult(searchPayload.query?.search || [], artist, identity.type);
     if (result) {
       const summary = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(result.title.replaceAll(' ', '_'))}`).then((response) => response.json());
       const wikiUrl = summary.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(result.title)}`;
@@ -772,7 +784,7 @@ form.addEventListener('submit', async (event) => {
       } }).catch(() => []);
       details = await getDetails();
       const lastfm = lastfmPageCard('artist', artist.name, artist.name, artistStat, artwork(details.artist, artwork(artist, '')), descriptionText(details.artist?.bio), lastfmArtistFacts(details.artist, artist));
-      const quizFacts = await artistTriviaFacts(artist.name, details.artist?.bio?.content || details.artist?.bio?.summary || '');
+      const quizFacts = await artistTriviaFacts(artist.name, details.artist?.bio?.content || details.artist?.bio?.summary || '', artist.mbid);
       const media = await mediaAssociationCards(artist.name, artist.name, 'artist', artistStat).catch(() => []);
       return { cards: [...wiki, ...media, lastfm], quizFacts: quizFacts.map((fact) => ({ ...fact, artist: artist.name, listeningStat: artistStat })) };
     }));

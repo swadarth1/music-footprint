@@ -104,7 +104,7 @@ function fetchJson(target, headers = {}) {
 const mediaAssociationCache = new Map();
 
 const placementVerb = '\\b(?:featured|feature|appeared|appearance(?:s)?|used|use|heard|included|played|licensed)\\b';
-const screenMediaContext = '\\b(?:film|movie|television|tv|series|season|episode|show|video game|game|soundtrack|commercial|advertisement|advertising|campaign|trailer|promo|opening credits|closing credits|end credits|theme song|theme music|original score)\\b';
+const screenMediaContext = '\\b(?:film|movie|television|tv|series|season|episode|video game|game|soundtrack|commercial|advertisement|advertising|campaign|trailer|promo|opening credits|closing credits|end credits|theme song|theme music|original score)\\b';
 const directPlacementKeywords = new RegExp(`${placementVerb}[^.]{0,140}${screenMediaContext}|${screenMediaContext}[^.]{0,140}${placementVerb}`, 'i');
 const soundtrackPlacementKeywords = /\b(?:soundtrack|theme song|theme music|original score)\b/i;
 const mediaSectionHeading = /(?:legacy|in popular culture|popular culture|media appearances|media usage|usage in media|soundtrack|television|film)/i;
@@ -158,7 +158,16 @@ async function wikipediaMediaAssociation(artist, entity, kind) {
     search.search = new URLSearchParams({ action: 'query', list: 'search', srsearch: term, srlimit: '8', format: 'json', origin: '*' });
     return fetchJson(search, wikipediaHeaders);
   }));
-  const candidates = searchResults.flatMap((result) => result.status === 'fulfilled' ? result.value.query?.search || [] : []);
+  let candidates = searchResults.flatMap((result) => result.status === 'fulfilled' ? result.value.query?.search || [] : []);
+  if (kind === 'artist') {
+    const exactGroupLookup = new URL('https://en.wikipedia.org/w/api.php');
+    exactGroupLookup.search = new URLSearchParams({ action: 'query', titles: `${entity} (band)|${entity} (group)|${entity} (music group)`, redirects: '1', format: 'json', origin: '*' });
+    const exactGroupPayload = await fetchJson(exactGroupLookup, wikipediaHeaders).catch(() => null);
+    const exactGroupCandidates = Object.values(exactGroupPayload?.query?.pages || {})
+      .filter((page) => !page.missing && /\((?:band|group|music group)\)$/i.test(page.title || ''))
+      .map((page) => ({ title: page.title, snippet: '' }));
+    if (exactGroupCandidates.length) candidates = exactGroupCandidates;
+  }
   const uniqueCandidates = [...new Map(candidates.map((candidate) => [candidate.title, candidate])).values()];
   const rankedCandidates = [...uniqueCandidates].sort((a, b) => {
     const score = (item) => {
