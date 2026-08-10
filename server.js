@@ -113,7 +113,7 @@ function plainText(value) {
   return decodeHtml(String(value || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
 
-function mediaSentence(value) {
+function mediaSentences(value, limit = 3) {
   const raw = String(value || '');
   const headings = [...raw.matchAll(/^={2,}\s*(.+?)\s*={2,}\s*$/gim)];
   const prioritySections = headings.flatMap((heading, index) => {
@@ -121,13 +121,22 @@ function mediaSentence(value) {
     return [raw.slice(heading.index + heading[0].length, headings[index + 1]?.index)];
   });
   const sources = [...prioritySections, raw];
+  const matches = [];
+  const seen = new Set();
   for (const source of sources) {
     const text = plainText(source);
-    const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
-    const match = sentences.find((sentence) => directPlacementKeywords.test(sentence) || soundtrackPlacementKeywords.test(sentence));
-    if (match) return match.trim();
+    // Split only on whitespace after terminal punctuation, preserving names such as D.E.B.S.
+    const sentences = text.split(/(?<=[.!?])\s+(?=["“']?[A-Z0-9])/).map((sentence) => sentence.trim()).filter(Boolean);
+    for (const sentence of sentences) {
+      if (!(directPlacementKeywords.test(sentence) || soundtrackPlacementKeywords.test(sentence))) continue;
+      const key = sentence.toLowerCase().replace(/\s+/g, ' ');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      matches.push(sentence);
+      if (matches.length >= limit) return matches;
+    }
   }
-  return '';
+  return matches;
 }
 
 function soundtrackLike(value) {
@@ -169,12 +178,12 @@ async function wikipediaMediaAssociation(artist, entity, kind) {
     extract.search = new URLSearchParams({ action: 'query', prop: 'extracts', explaintext: '1', titles: candidate.title, format: 'json', origin: '*' });
     const page = await fetchJson(extract, wikipediaHeaders);
     const content = Object.values(page.query?.pages || {})[0]?.extract || candidate.snippet || '';
-    const sentence = mediaSentence(content);
-    if (!sentence) return null;
+    const sentences = mediaSentences(content);
+    if (!sentences.length) return [];
     const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(candidate.title.replaceAll(' ', '_'))}`;
-    return { source: 'Wikipedia', kind: directPlacementKeywords.test(sentence) ? 'Featured in screen media' : kind === 'artist' ? 'Screen-music association' : 'Soundtrack association', title: candidate.title, excerpt: sentence, url };
+    return sentences.map((sentence) => ({ source: 'Wikipedia', kind: directPlacementKeywords.test(sentence) ? 'Featured in screen media' : kind === 'artist' ? 'Screen-music association' : 'Soundtrack association', title: candidate.title, excerpt: sentence, url }));
   }));
-  return results.find((result) => result.status === 'fulfilled' && result.value)?.value || null;
+  return results.find((result) => result.status === 'fulfilled' && result.value?.length)?.value || [];
 }
 
 async function discogsMediaAssociation(artist, album) {
@@ -253,7 +262,7 @@ http.createServer((request, response) => {
       wikipediaMediaAssociation(artist, entity, kind),
       kind === 'album' ? discogsMediaAssociation(artist, entity) : Promise.resolve(null),
     ]).then((results) => {
-      const associations = results.map((result) => result.status === 'fulfilled' ? result.value : null).filter(Boolean);
+      const associations = results.flatMap((result) => result.status === 'fulfilled' ? Array.isArray(result.value) ? result.value : result.value ? [result.value] : [] : []);
       const payload = { associations };
       // Empty results are often transient upstream failures; do not make them persist for 12 hours.
       if (associations.length) mediaAssociationCache.set(cacheKey, { createdAt: Date.now(), payload });

@@ -624,14 +624,14 @@ async function mediaAssociationCards(artist, entity, kind, listeningStat) {
   const payload = await response.json();
   const seen = new Set();
   return (payload.associations || []).filter((association) => {
-    const key = `${association.source}:${association.title}:${association.url}`;
+    const key = `${association.source}:${association.title}:${association.url}:${association.excerpt}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return association.title && association.excerpt && association.url;
   }).slice(0, 3).map((association) => {
     const source = mediaSourceDetails[association.source] || { logo: '', label: association.source };
     const logo = source.logo ? `<img class="media-logo" src="${source.logo}" alt="" onerror="this.style.display='none'" />` : '';
-    return `<a class="media-source" data-media-source="${escapeHtml(source.label)}" data-card-id="media-${encodeURIComponent(`${kind}-${artist}-${entity}-${association.source}-${association.title}`)}" href="${association.url}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(association.source)} media association"><small class="personal-stat">${escapeHtml(listeningStat)}</small><span class="media-type">${escapeHtml(association.kind)}</span><span class="media-brand">${logo}<b>${escapeHtml(source.label)}</b></span><p>${escapeHtml(association.title)}</p><q>${escapeHtml(association.excerpt)}</q><span class="media-origin">${escapeHtml(entity)} · ${escapeHtml(artist)}</span><i>↗</i></a>`;
+    return `<a class="media-source" data-media-source="${escapeHtml(source.label)}" data-card-id="media-${encodeURIComponent(`${kind}-${artist}-${entity}-${association.source}-${association.title}-${association.excerpt}`)}" href="${association.url}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(association.source)} media association"><small class="personal-stat">${escapeHtml(listeningStat)}</small><span class="media-type">${escapeHtml(association.kind)}</span><span class="media-brand">${logo}<b>${escapeHtml(source.label)}</b></span><p>${escapeHtml(association.title)}</p><q>${escapeHtml(association.excerpt)}</q><span class="media-origin">${escapeHtml(entity)} · ${escapeHtml(artist)}</span><i>↗</i></a>`;
   });
 }
 
