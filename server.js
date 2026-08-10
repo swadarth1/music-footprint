@@ -190,7 +190,7 @@ async function wikipediaMediaAssociation(artist, entity, kind) {
     const sentences = mediaSentences(content);
     if (!sentences.length) return [];
     const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(candidate.title.replaceAll(' ', '_'))}`;
-    return sentences.map((sentence) => ({ source: 'Wikipedia', kind: directPlacementKeywords.test(sentence) ? 'Featured in screen media' : kind === 'artist' ? 'Screen-music association' : 'Soundtrack association', title: candidate.title, excerpt: sentence, url }));
+    return [{ source: 'Wikipedia', kind: directPlacementKeywords.test(sentences[0]) ? 'Featured in screen media' : kind === 'artist' ? 'Screen-music association' : 'Soundtrack association', title: candidate.title, excerpt: sentences.join('\n'), excerpts: sentences, url }];
   }));
   return results.find((result) => result.status === 'fulfilled' && result.value?.length)?.value || [];
 }

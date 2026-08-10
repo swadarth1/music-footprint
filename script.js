@@ -643,7 +643,9 @@ async function mediaAssociationCards(artist, entity, kind, listeningStat) {
   }).slice(0, 3).map((association) => {
     const source = mediaSourceDetails[association.source] || { logo: '', label: association.source };
     const logo = source.logo ? `<img class="media-logo" src="${source.logo}" alt="" onerror="this.style.display='none'" />` : '';
-    return `<a class="media-source" data-media-source="${escapeHtml(source.label)}" data-card-id="media-${encodeURIComponent(`${kind}-${artist}-${entity}-${association.source}-${association.title}-${association.excerpt}`)}" href="${association.url}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(association.source)} media association"><small class="personal-stat">${escapeHtml(listeningStat)}</small><span class="media-type">${escapeHtml(association.kind)}</span><span class="media-brand">${logo}<b>${escapeHtml(source.label)}</b></span><p>${escapeHtml(association.title)}</p><q>${escapeHtml(association.excerpt)}</q><span class="media-origin">${escapeHtml(entity)} · ${escapeHtml(artist)}</span><i>↗</i></a>`;
+    const excerpts = Array.isArray(association.excerpts) ? association.excerpts : [association.excerpt];
+    const coverage = excerpts.map((excerpt) => `<span>${escapeHtml(excerpt)}</span>`).join('');
+    return `<a class="media-source" data-media-source="${escapeHtml(source.label)}" data-card-id="media-${encodeURIComponent(`${kind}-${artist}-${entity}-${association.source}-${association.title}-${association.excerpt}`)}" href="${association.url}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(association.source)} media association"><small class="personal-stat">${escapeHtml(listeningStat)}</small><span class="media-type">${escapeHtml(association.kind)}</span><span class="media-brand">${logo}<b>${escapeHtml(source.label)}</b></span><p>${escapeHtml(association.title)}</p><div class="media-coverage">${coverage}</div><span class="media-origin">${escapeHtml(entity)} · ${escapeHtml(artist)}</span><i>↗</i></a>`;
   });
 }
 
