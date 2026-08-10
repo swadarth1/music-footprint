@@ -101,6 +101,28 @@ function fetchJson(target, headers = {}) {
   });
 }
 
+let nextMusicBrainzRequestAt = 0;
+const mediaAssociationCache = new Map();
+
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function fetchMusicBrainzJson(target, attempt = 0) {
+  const scheduledAt = Math.max(Date.now(), nextMusicBrainzRequestAt);
+  nextMusicBrainzRequestAt = scheduledAt + 1100;
+  if (scheduledAt > Date.now()) await wait(scheduledAt - Date.now());
+  try {
+    return await fetchJson(target, { 'User-Agent': 'MusicFootprint/1.0 (contact: local-listening-board)' });
+  } catch (error) {
+    if (/503/.test(error.message) && attempt < 1) {
+      await wait(2500);
+      return fetchMusicBrainzJson(target, attempt + 1);
+    }
+    throw error;
+  }
+}
+
 const mediaKeywords = /\b(?:featured|appeared|used|heard|included|soundtrack|theme song|theme music|score|film|movie|television|TV series|video game|game)\b/i;
 const directPlacementKeywords = /\b(?:featured|appeared|used|heard|included)\b[^.]{0,100}\b(?:film|movie|television|TV|series|episode|game|soundtrack)\b|\b(?:film|movie|television|TV|series|episode|game)\b[^.]{0,100}\b(?:featured|appeared|used|heard|included)\b/i;
 
@@ -142,11 +164,11 @@ async function musicBrainzMediaAssociation(artist, entity, kind) {
   const field = kind === 'album' ? 'releasegroup' : 'recording';
   const search = new URL(`https://musicbrainz.org/ws/2/${type}`);
   search.search = new URLSearchParams({ fmt: 'json', limit: '5', query: `${field}:"${entity}" AND artist:"${artist}"` });
-  const matches = await fetchJson(search, { 'User-Agent': 'MusicFootprint/1.0 (contact: local-listening-board)' });
+  const matches = await fetchMusicBrainzJson(search);
   const entries = matches[kind === 'album' ? 'release-groups' : 'recordings'] || [];
   const exact = entries.find((entry) => entry.title?.toLowerCase() === entity.toLowerCase()) || entries[0];
   if (!exact) return null;
-  const lookup = await fetchJson(`https://musicbrainz.org/ws/2/${type}/${encodeURIComponent(exact.id)}?fmt=json&inc=releases`, { 'User-Agent': 'MusicFootprint/1.0 (contact: local-listening-board)' });
+  const lookup = await fetchMusicBrainzJson(`https://musicbrainz.org/ws/2/${type}/${encodeURIComponent(exact.id)}?fmt=json&inc=releases`);
   const release = (lookup.releases || []).find((item) => soundtrackLike(item.title));
   if (!release) return null;
   return { source: 'MusicBrainz', kind: 'Official soundtrack release', title: release.title, excerpt: `${entity} is listed on the official soundtrack release ${release.title}.`, url: `https://musicbrainz.org/release/${release.id}` };
@@ -217,13 +239,18 @@ http.createServer((request, response) => {
     const entity = url.searchParams.get('entity') || '';
     const kind = url.searchParams.get('kind') || '';
     if (!artist || !entity || !['track', 'album', 'artist'].includes(kind) || artist.length > 160 || entity.length > 160) return send(response, 400, JSON.stringify({ message: 'Invalid media-association request.' }));
+    const cacheKey = `${kind}\u0000${artist.toLowerCase()}\u0000${entity.toLowerCase()}`;
+    const cached = mediaAssociationCache.get(cacheKey);
+    if (cached && Date.now() - cached.createdAt < 1000 * 60 * 60 * 12) return send(response, 200, JSON.stringify(cached.payload));
     Promise.allSettled([
       wikipediaMediaAssociation(artist, entity, kind),
       musicBrainzMediaAssociation(artist, entity, kind),
       kind === 'album' ? discogsMediaAssociation(artist, entity) : Promise.resolve(null),
     ]).then((results) => {
       const associations = results.map((result) => result.status === 'fulfilled' ? result.value : null).filter(Boolean);
-      send(response, 200, JSON.stringify({ associations }));
+      const payload = { associations };
+      mediaAssociationCache.set(cacheKey, { createdAt: Date.now(), payload });
+      send(response, 200, JSON.stringify(payload));
     }).catch(() => send(response, 200, JSON.stringify({ associations: [] })));
     return;
   }
