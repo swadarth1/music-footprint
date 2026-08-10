@@ -185,6 +185,15 @@ async function wikipediaMediaAssociation(artist, entity, kind) {
   const normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const normalizedEntity = normalize(entity);
   const normalizedArtist = normalize(artist);
+  const entityTerms = normalizedEntity.split(' ').filter((term) => term.length > 2 && !['the', 'and', 'for', 'with', 'from', 'into'].includes(term));
+  const isRelevantMusicPage = (candidate, content) => {
+    const normalizedTitle = normalize(candidate.title);
+    const normalizedContent = normalize(content);
+    const requiredTitleTerms = Math.min(2, entityTerms.length);
+    const titleMatches = entityTerms.filter((term) => normalizedTitle.includes(term)).length >= requiredTitleTerms;
+    const entityMatches = kind === 'artist' || normalizedContent.includes(normalizedEntity);
+    return titleMatches && entityMatches && normalizedContent.includes(normalizedArtist);
+  };
   const pageType = kind === 'track' ? 'song' : kind === 'album' ? 'album' : 'band';
   // Music entities often have a specific disambiguated Wikipedia page, such as "Sleepyhead (song)".
   const search = new URL('https://en.wikipedia.org/w/api.php');
@@ -226,13 +235,14 @@ async function wikipediaMediaAssociation(artist, entity, kind) {
     extract.search = new URLSearchParams({ action: 'query', prop: 'extracts', explaintext: '1', titles: candidate.title, format: 'json', origin: '*' });
     const page = await fetchWikipediaJson(extract);
     const content = Object.values(page.query?.pages || {})[0]?.extract || candidate.snippet || '';
+    if (!isRelevantMusicPage(candidate, content)) continue;
     const sentences = mediaSentences(content);
     if (!sentences.length) continue;
     const pageLinks = await wikipediaPageLinks(candidate.title).catch(() => []);
     const excerptLinks = sentences.map((sentence) => pageLinks
       .filter((link) => link.label.length > 1 && sentence.toLowerCase().includes(link.label.toLowerCase())));
     const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(candidate.title.replaceAll(' ', '_'))}`;
-    return [{ source: 'Wikipedia', kind: directPlacementKeywords.test(sentences[0]) ? 'Featured in screen media' : kind === 'artist' ? 'Screen-music association' : 'Soundtrack association', title: candidate.title, excerpt: sentences.join('\n'), excerpts: sentences, excerptLinks, url }];
+    return [{ source: 'Wikipedia', kind: directPlacementKeywords.test(sentences[0]) ? 'Featured in media' : kind === 'artist' ? 'Media association' : 'Soundtrack association', title: candidate.title, excerpt: sentences.join('\n'), excerpts: sentences, excerptLinks, url }];
     } catch { /* Try the next music-relevant page candidate. */ }
   }
   return [];
