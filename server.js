@@ -103,17 +103,31 @@ function fetchJson(target, headers = {}) {
 
 const mediaAssociationCache = new Map();
 
-const directPlacementKeywords = /\b(?:featured|appeared|used|heard|included)\b[^.]{0,100}\b(?:film|movie|television|TV|series|episode|game|soundtrack)\b|\b(?:film|movie|television|TV|series|episode|game)\b[^.]{0,100}\b(?:featured|appeared|used|heard|included)\b/i;
+const placementVerb = '\\b(?:featured|feature|appeared|appearance(?:s)?|used|use|heard|included|played|licensed)\\b';
+const screenMediaContext = '\\b(?:film|movie|television|tv|series|season|episode|show|video game|game|soundtrack|commercial|advertisement|advertising|campaign|trailer|promo|opening credits|closing credits|end credits|theme song|theme music|original score)\\b';
+const directPlacementKeywords = new RegExp(`${placementVerb}[^.]{0,140}${screenMediaContext}|${screenMediaContext}[^.]{0,140}${placementVerb}`, 'i');
 const soundtrackPlacementKeywords = /\b(?:soundtrack|theme song|theme music|original score)\b/i;
+const mediaSectionHeading = /(?:legacy|in popular culture|popular culture|media appearances|media usage|usage in media|soundtrack|television|film)/i;
 
 function plainText(value) {
   return decodeHtml(String(value || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
 
 function mediaSentence(value) {
-  const text = plainText(value);
-  const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
-  return sentences.find((sentence) => directPlacementKeywords.test(sentence) || soundtrackPlacementKeywords.test(sentence))?.trim() || '';
+  const raw = String(value || '');
+  const headings = [...raw.matchAll(/^={2,}\s*(.+?)\s*={2,}\s*$/gim)];
+  const prioritySections = headings.flatMap((heading, index) => {
+    if (!mediaSectionHeading.test(heading[1])) return [];
+    return [raw.slice(heading.index + heading[0].length, headings[index + 1]?.index)];
+  });
+  const sources = [...prioritySections, raw];
+  for (const source of sources) {
+    const text = plainText(source);
+    const sentences = text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [];
+    const match = sentences.find((sentence) => directPlacementKeywords.test(sentence) || soundtrackPlacementKeywords.test(sentence));
+    if (match) return match.trim();
+  }
+  return '';
 }
 
 function soundtrackLike(value) {
@@ -122,18 +136,27 @@ function soundtrackLike(value) {
 
 async function wikipediaMediaAssociation(artist, entity, kind) {
   const wikipediaHeaders = { 'User-Agent': 'MusicFootprint/1.0 (local listening board)' };
-  const search = new URL('https://en.wikipedia.org/w/api.php');
-  search.search = new URLSearchParams({ action: 'query', list: 'search', srsearch: `${entity} ${artist}`, srlimit: '8', format: 'json', origin: '*' });
-  const found = await fetchJson(search, wikipediaHeaders);
-  const candidates = found.query?.search || [];
   const normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const normalizedEntity = normalize(entity);
   const normalizedArtist = normalize(artist);
-  const rankedCandidates = [...candidates].sort((a, b) => {
+  const pageType = kind === 'track' ? 'song' : kind === 'album' ? 'album' : 'band';
+  // Music entities often have a specific disambiguated Wikipedia page, such as "Sleepyhead (song)".
+  const searchTerms = kind === 'artist'
+    ? [`${entity} ${artist}`]
+    : [`${entity} ${artist}`, `"${entity}" ${pageType} ${artist}`];
+  const searchResults = await Promise.allSettled(searchTerms.map(async (term) => {
+    const search = new URL('https://en.wikipedia.org/w/api.php');
+    search.search = new URLSearchParams({ action: 'query', list: 'search', srsearch: term, srlimit: '8', format: 'json', origin: '*' });
+    return fetchJson(search, wikipediaHeaders);
+  }));
+  const candidates = searchResults.flatMap((result) => result.status === 'fulfilled' ? result.value.query?.search || [] : []);
+  const uniqueCandidates = [...new Map(candidates.map((candidate) => [candidate.title, candidate])).values()];
+  const rankedCandidates = [...uniqueCandidates].sort((a, b) => {
     const score = (item) => {
       const title = normalize(item.title);
       const snippet = normalize(item.snippet);
       if (title === normalizedEntity) return 0;
+      if (kind !== 'artist' && title.startsWith(`${normalizedEntity} ${pageType}`)) return 0;
       if (title.includes(normalizedEntity)) return 1;
       if (snippet.includes(normalizedEntity) && snippet.includes(normalizedArtist)) return 2;
       return 3;
@@ -141,7 +164,7 @@ async function wikipediaMediaAssociation(artist, entity, kind) {
     return score(a) - score(b);
   });
 
-  const results = await Promise.allSettled(rankedCandidates.slice(0, 4).map(async (candidate) => {
+  const results = await Promise.allSettled(rankedCandidates.slice(0, 5).map(async (candidate) => {
     const extract = new URL('https://en.wikipedia.org/w/api.php');
     extract.search = new URLSearchParams({ action: 'query', prop: 'extracts', explaintext: '1', titles: candidate.title, format: 'json', origin: '*' });
     const page = await fetchJson(extract, wikipediaHeaders);
@@ -232,7 +255,8 @@ http.createServer((request, response) => {
     ]).then((results) => {
       const associations = results.map((result) => result.status === 'fulfilled' ? result.value : null).filter(Boolean);
       const payload = { associations };
-      mediaAssociationCache.set(cacheKey, { createdAt: Date.now(), payload });
+      // Empty results are often transient upstream failures; do not make them persist for 12 hours.
+      if (associations.length) mediaAssociationCache.set(cacheKey, { createdAt: Date.now(), payload });
       send(response, 200, JSON.stringify(payload));
     }).catch(() => send(response, 200, JSON.stringify({ associations: [] })));
     return;
