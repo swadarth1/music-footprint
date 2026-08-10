@@ -102,6 +102,26 @@ function fetchJson(target, headers = {}) {
 }
 
 const mediaAssociationCache = new Map();
+let nextWikipediaRequestAt = 0;
+
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function fetchWikipediaJson(target, attempt = 0) {
+  const scheduledAt = Math.max(Date.now(), nextWikipediaRequestAt);
+  nextWikipediaRequestAt = scheduledAt + 200;
+  if (scheduledAt > Date.now()) await wait(scheduledAt - Date.now());
+  try {
+    return await fetchJson(target, { 'User-Agent': 'MusicFootprint/1.0 (https://github.com/swadarth1/music-footprint)' });
+  } catch (error) {
+    if (/429/.test(error.message) && attempt < 3) {
+      await wait(1500 * (attempt + 1));
+      return fetchWikipediaJson(target, attempt + 1);
+    }
+    throw error;
+  }
+}
 
 const placementVerb = '\\b(?:featured|feature|appeared|appearance(?:s)?|used|use|heard|included|played|licensed)\\b';
 const screenMediaContext = '\\b(?:film|movie|television|tv|series|season|episode|video game|game|soundtrack|commercial|advertisement|advertising|campaign|trailer|promo|opening credits|closing credits|end credits|theme song|theme music|original score)\\b';
@@ -149,7 +169,7 @@ function mediaSentences(value, limit = 3) {
 async function wikipediaPageLinks(title, headers) {
   const parseUrl = new URL('https://en.wikipedia.org/w/api.php');
   parseUrl.search = new URLSearchParams({ action: 'parse', page: title, prop: 'text', format: 'json', origin: '*' });
-  const payload = await fetchJson(parseUrl, headers);
+  const payload = await fetchWikipediaJson(parseUrl, headers);
   const markup = payload.parse?.text?.['*'] || '';
   const links = [...markup.matchAll(/<a\b[^>]*\bhref=["'](?:\.\/|\/wiki\/)([^"'#?]+)[^>]*>([\s\S]*?)<\/a>/gi)]
     .map((match) => ({ title: decodeHtml(decodeURIComponent(match[1])).replaceAll('_', ' '), label: plainText(match[2]) }))
@@ -162,25 +182,25 @@ function soundtrackLike(value) {
 }
 
 async function wikipediaMediaAssociation(artist, entity, kind) {
-  const wikipediaHeaders = { 'User-Agent': 'MusicFootprint/1.0 (local listening board)' };
   const normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const normalizedEntity = normalize(entity);
   const normalizedArtist = normalize(artist);
   const pageType = kind === 'track' ? 'song' : kind === 'album' ? 'album' : 'band';
   // Music entities often have a specific disambiguated Wikipedia page, such as "Sleepyhead (song)".
-  const searchTerms = kind === 'artist'
-    ? [`${entity} ${artist}`]
-    : [`${entity} ${artist}`, `"${entity}" ${pageType} ${artist}`];
-  const searchResults = await Promise.allSettled(searchTerms.map(async (term) => {
-    const search = new URL('https://en.wikipedia.org/w/api.php');
-    search.search = new URLSearchParams({ action: 'query', list: 'search', srsearch: term, srlimit: '8', format: 'json', origin: '*' });
-    return fetchJson(search, wikipediaHeaders);
-  }));
-  let candidates = searchResults.flatMap((result) => result.status === 'fulfilled' ? result.value.query?.search || [] : []);
+  const search = new URL('https://en.wikipedia.org/w/api.php');
+  search.search = new URLSearchParams({ action: 'query', list: 'search', srsearch: `${entity} ${artist}`, srlimit: '8', format: 'json', origin: '*' });
+  const searchPayload = await fetchWikipediaJson(search);
+  let candidates = searchPayload.query?.search || [];
+  if (!candidates.length && kind !== 'artist') {
+    const typedSearch = new URL('https://en.wikipedia.org/w/api.php');
+    typedSearch.search = new URLSearchParams({ action: 'query', list: 'search', srsearch: `"${entity}" ${pageType} ${artist}`, srlimit: '8', format: 'json', origin: '*' });
+    const typedPayload = await fetchWikipediaJson(typedSearch);
+    candidates = typedPayload.query?.search || [];
+  }
   if (kind === 'artist') {
     const exactGroupLookup = new URL('https://en.wikipedia.org/w/api.php');
     exactGroupLookup.search = new URLSearchParams({ action: 'query', titles: `${entity} (band)|${entity} (group)|${entity} (music group)`, redirects: '1', format: 'json', origin: '*' });
-    const exactGroupPayload = await fetchJson(exactGroupLookup, wikipediaHeaders).catch(() => null);
+    const exactGroupPayload = await fetchWikipediaJson(exactGroupLookup).catch(() => null);
     const exactGroupCandidates = Object.values(exactGroupPayload?.query?.pages || {})
       .filter((page) => !page.missing && /\((?:band|group|music group)\)$/i.test(page.title || ''))
       .map((page) => ({ title: page.title, snippet: '' }));
@@ -200,15 +220,15 @@ async function wikipediaMediaAssociation(artist, entity, kind) {
     return score(a) - score(b);
   });
 
-  for (const candidate of rankedCandidates.slice(0, 3)) {
+  for (const candidate of rankedCandidates.slice(0, 2)) {
     try {
     const extract = new URL('https://en.wikipedia.org/w/api.php');
     extract.search = new URLSearchParams({ action: 'query', prop: 'extracts', explaintext: '1', titles: candidate.title, format: 'json', origin: '*' });
-    const page = await fetchJson(extract, wikipediaHeaders);
+    const page = await fetchWikipediaJson(extract);
     const content = Object.values(page.query?.pages || {})[0]?.extract || candidate.snippet || '';
     const sentences = mediaSentences(content);
     if (!sentences.length) continue;
-    const pageLinks = await wikipediaPageLinks(candidate.title, wikipediaHeaders).catch(() => []);
+    const pageLinks = await wikipediaPageLinks(candidate.title).catch(() => []);
     const excerptLinks = sentences.map((sentence) => pageLinks
       .filter((link) => link.label.length > 1 && sentence.toLowerCase().includes(link.label.toLowerCase())));
     const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(candidate.title.replaceAll(' ', '_'))}`;
