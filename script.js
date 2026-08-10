@@ -241,7 +241,7 @@ function scheduleSelectionPreview() {
   previewTimer = window.setTimeout(refreshSelectionPreview, 450);
 }
 
-const draggableCardSelector = '.wiki-summary,.citation-source,.lastfm-source,.quiz-source,.lrclib-source';
+const draggableCardSelector = '.wiki-summary,.citation-source,.lastfm-source,.quiz-source,.lrclib-source,.media-source';
 let draggedCard = null;
 
 function componentForCard(card) {
@@ -249,6 +249,7 @@ function componentForCard(card) {
   if (card.classList.contains('citation-source')) return 'citation';
   if (card.classList.contains('quiz-source')) return 'quiz';
   if (card.classList.contains('lrclib-source')) return 'lyrics';
+  if (card.classList.contains('media-source')) return 'media';
   if (card.classList.contains('lastfm-source')) return card.classList.contains('album') ? 'album' : card.classList.contains('artist') ? 'artist' : 'track';
   return '';
 }
@@ -610,6 +611,29 @@ async function lrclibCard(artist, track, listeningStat) {
   return `<a class="lrclib-source" data-card-id="lyrics-${encodeURIComponent(`${artist}-${track}`)}" href="${geniusUrl}" target="_blank" rel="noreferrer" aria-label="Open Genius annotations for ${escapeHtml(track)}"><small class="personal-stat">${escapeHtml(listeningStat)}</small><img class="genius-logo" src="/assets/genius-logo.png" alt="Genius" /><img class="service-logo lrclib-logo" src="https://lrclib.net/favicon.ico" alt="LRCLIB" /><q>${escapeHtml(payload.excerpt)}…</q><span>${escapeHtml(track)} · ${escapeHtml(artist)}<br />Lyrics provided by LRCLIB · annotations on Genius</span><i>↗</i></a>`;
 }
 
+const mediaSourceDetails = {
+  Wikipedia: { logo: 'https://en.wikipedia.org/static/favicon/wikipedia.ico', label: 'Wikipedia' },
+  MusicBrainz: { logo: 'https://musicbrainz.org/favicon.ico', label: 'MusicBrainz' },
+  Discogs: { logo: 'https://www.discogs.com/favicon.ico', label: 'Discogs' },
+};
+
+async function mediaAssociationCards(artist, entity, kind, listeningStat) {
+  const response = await fetch(`/api/media-associations?${new URLSearchParams({ artist, entity, kind })}`);
+  if (!response.ok) return [];
+  const payload = await response.json();
+  const seen = new Set();
+  return (payload.associations || []).filter((association) => {
+    const key = `${association.source}:${association.title}:${association.url}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return association.title && association.excerpt && association.url;
+  }).slice(0, 3).map((association) => {
+    const source = mediaSourceDetails[association.source] || { logo: '', label: association.source };
+    const logo = source.logo ? `<img class="media-logo" src="${source.logo}" alt="" onerror="this.style.display='none'" />` : '';
+    return `<a class="media-source" data-card-id="media-${encodeURIComponent(`${kind}-${artist}-${entity}-${association.source}-${association.title}`)}" href="${association.url}" target="_blank" rel="noreferrer" aria-label="Open ${escapeHtml(association.source)} media association"><small class="personal-stat">${escapeHtml(listeningStat)}</small><span class="media-type">${escapeHtml(association.kind)}</span><span class="media-brand">${logo}<b>${escapeHtml(source.label)}</b></span><p>${escapeHtml(association.title)}</p><q>${escapeHtml(association.excerpt)}</q><span class="media-origin">${escapeHtml(entity)} · ${escapeHtml(artist)}</span><i>↗</i></a>`;
+  });
+}
+
 function descriptionText(wiki) {
   return (wiki?.content || wiki?.summary || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().replace(/Read more on Last\.fm\.?$/i, '');
 }
@@ -727,9 +751,12 @@ form.addEventListener('submit', async (event) => {
       const title = track.name;
       const trackStat = playLabel(track.playcount, period);
       const trackDetails = await apiRequest('track.getInfo', { artist, track: title }).catch(() => ({}));
-      const lrclib = await lrclibCard(artist, title, trackStat).catch(() => '');
+      const [lrclib, media] = await Promise.all([
+        lrclibCard(artist, title, trackStat).catch(() => ''),
+        mediaAssociationCards(artist, title, 'track', trackStat).catch(() => []),
+      ]);
       const trackCard = lastfmPageCard('track', artist, title, trackStat, artwork(trackDetails.track, artwork(track, '')), descriptionText(trackDetails.track?.wiki), lastfmTrackFacts(trackDetails.track));
-      return [lrclib, trackCard];
+      return [lrclib, ...media, trackCard];
     }));
     const artistResults = await Promise.all(artists.map(async (artist) => {
       const artistStat = playLabel(artist.playcount, period);
@@ -745,14 +772,16 @@ form.addEventListener('submit', async (event) => {
       details = await getDetails();
       const lastfm = lastfmPageCard('artist', artist.name, artist.name, artistStat, artwork(details.artist, artwork(artist, '')), descriptionText(details.artist?.bio), lastfmArtistFacts(details.artist, artist));
       const quizFacts = await artistTriviaFacts(artist.name, details.artist?.bio?.content || details.artist?.bio?.summary || '');
-      return { cards: [...wiki, lastfm], quizFacts: quizFacts.map((fact) => ({ ...fact, artist: artist.name, listeningStat: artistStat })) };
+      const media = await mediaAssociationCards(artist.name, artist.name, 'artist', artistStat).catch(() => []);
+      return { cards: [...wiki, ...media, lastfm], quizFacts: quizFacts.map((fact) => ({ ...fact, artist: artist.name, listeningStat: artistStat })) };
     }));
     const albumCards = await Promise.all(albums.map(async (album) => {
       const artist = album.artist?.name || album.artist;
       const albumStat = playLabel(album.playcount, period);
       const details = await apiRequest('album.getInfo', { artist, album: album.name }).catch(() => ({}));
       const albumFacts = lastfmAlbumFacts(details.album);
-      return lastfmPageCard('album', artist, album.name, albumStat, artwork(details.album, artwork(album, '')), descriptionText(details.album?.wiki), albumFacts.markup, albumFacts.length);
+      const media = await mediaAssociationCards(artist, album.name, 'album', albumStat).catch(() => []);
+      return [...media, lastfmPageCard('album', artist, album.name, albumStat, artwork(details.album, artwork(album, '')), descriptionText(details.album?.wiki), albumFacts.markup, albumFacts.length)];
     }));
     const quizFacts = artistResults.flatMap((result) => result.quizFacts);
     const quizCards = quizFacts.map((fact) => artistQuizCard(fact, fact.listeningStat, quizFacts.filter((other) => other !== fact && other.type === fact.type).map((other) => other.answer))).filter(Boolean);
