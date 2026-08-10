@@ -487,6 +487,7 @@ const fallbackQuizAnswers = {
   location: ['Austin, Texas', 'Brooklyn, New York', 'Chicago, Illinois', 'Los Angeles, California', 'Manchester, England', 'Montreal, Quebec', 'Nashville, Tennessee', 'Portland, Oregon', 'Seattle, Washington', 'Toronto, Ontario'],
   formationYear: ['1978', '1984', '1989', '1993', '1998', '2002', '2006', '2010'],
   label: ['4AD', 'Domino Recording Company', 'Matador Records', 'Merge Records', 'Sub Pop', 'Warp Records'],
+  trackCount: ['3', '5', '7', '9', '11', '13', '15', '18'],
 };
 
 function cleanLocation(value) {
@@ -626,6 +627,33 @@ function artistQuizCard(fact, listeningStat, distractorAnswers) {
   const excerpt = quizExcerpt(fact);
   const explanation = excerpt ? `<div class="quiz-explanation" hidden>${excerpt}</div>` : '';
   return `<article class="quiz-source" data-card-id="quiz-${fact.type}-${encodeURIComponent(fact.artist)}"><small class="personal-stat">${escapeHtml(listeningStat)}</small><span class="quiz-kicker">Artist quiz</span><p>${escapeHtml(quizQuestion(fact, fact.artist))}</p><div class="quiz-options">${options}</div><small class="quiz-feedback" aria-live="polite"></small>${explanation}<a class="quiz-source-link" href="${fact.url}" target="_blank" rel="noreferrer">Source: ${escapeHtml(fact.source)} ↗</a></article>`;
+}
+
+function albumTrackCountFact(album, artist, payload, listeningStat) {
+  const trackList = payload?.tracks?.track;
+  const count = Array.isArray(trackList) ? trackList.length : trackList ? 1 : 0;
+  if (count <= 2) return null;
+  return {
+    type: 'trackCount',
+    answer: String(count),
+    album: album.name,
+    artist,
+    listeningStat,
+    source: 'Last.fm',
+    url: lastfmUrl(artist, album.name),
+    excerpt: `${album.name} by ${artist} has ${count} tracks according to Last.fm.`,
+  };
+}
+
+function albumTrackQuizCard(fact, distractorAnswers) {
+  const answerKey = fact.answer.toLowerCase();
+  const uniqueAnswers = (answers) => [...new Set(answers.map((answer) => String(answer || '').trim()).filter((answer) => answer && answer.toLowerCase() !== answerKey))];
+  const choices = [...uniqueAnswers(distractorAnswers), ...shuffle(uniqueAnswers(fallbackQuizAnswers.trackCount || []))].slice(0, 3);
+  if (choices.length < 3) return '';
+  const options = shuffle([fact.answer, ...choices]).map((answer) => `<button class="quiz-option" type="button" data-correct="${answer === fact.answer}">${escapeHtml(answer)}</button>`).join('');
+  const excerpt = quizExcerpt(fact);
+  const explanation = excerpt ? `<div class="quiz-explanation" hidden>${excerpt}</div>` : '';
+  return `<article class="quiz-source album-quiz" data-card-id="quiz-track-count-${encodeURIComponent(`${fact.artist}-${fact.album}`)}"><small class="personal-stat">${escapeHtml(fact.listeningStat)}</small><span class="quiz-kicker">Album quiz</span><p>How many tracks are on ${escapeHtml(fact.album)}?</p><div class="quiz-options">${options}</div><small class="quiz-feedback" aria-live="polite"></small>${explanation}<a class="quiz-source-link" href="${fact.url}" target="_blank" rel="noreferrer">Source: ${escapeHtml(fact.source)} ↗</a></article>`;
 }
 
 async function geniusPageUrl(artist, track) {
@@ -828,17 +856,23 @@ form.addEventListener('submit', async (event) => {
       const media = await mediaAssociationCards(artist.name, artist.name, 'artist', artistStat).catch(() => []);
       return { cards: [...wiki, ...media, lastfm], quizFacts: quizFacts.map((fact) => ({ ...fact, artist: artist.name, listeningStat: artistStat })) };
     }));
-    const albumCards = await Promise.all(albums.map(async (album) => {
+    const albumResults = await Promise.all(albums.map(async (album) => {
       const artist = album.artist?.name || album.artist;
       const albumStat = playLabel(album.playcount, period);
       const details = await apiRequest('album.getInfo', { artist, album: album.name }).catch(() => ({}));
       const albumFacts = lastfmAlbumFacts(details.album);
       const media = await mediaAssociationCards(artist, album.name, 'album', albumStat).catch(() => []);
-      return [...media, lastfmPageCard('album', artist, album.name, albumStat, artwork(details.album, artwork(album, '')), descriptionText(details.album?.wiki), albumFacts.markup, albumFacts.length)];
+      return {
+        cards: [...media, lastfmPageCard('album', artist, album.name, albumStat, artwork(details.album, artwork(album, '')), descriptionText(details.album?.wiki), albumFacts.markup, albumFacts.length)],
+        quizFact: albumTrackCountFact(album, artist, details.album, albumStat),
+      };
     }));
     const quizFacts = artistResults.flatMap((result) => result.quizFacts);
     const quizCards = quizFacts.map((fact) => artistQuizCard(fact, fact.listeningStat, quizFacts.filter((other) => other !== fact && other.type === fact.type).map((other) => other.answer))).filter(Boolean);
-    const allCards = [...artistResults.flatMap((result) => result.cards), ...quizCards, ...cards.flat(), ...albumCards.flat()].filter(Boolean);
+    // Album quizzes follow the selected listening order and never exceed three cards.
+    const albumQuizFacts = albumResults.map((result) => result.quizFact).filter(Boolean).slice(0, 3);
+    const albumQuizCards = albumQuizFacts.map((fact) => albumTrackQuizCard(fact, albumQuizFacts.filter((other) => other !== fact).map((other) => other.answer))).filter(Boolean);
+    const allCards = [...artistResults.flatMap((result) => result.cards), ...quizCards, ...albumQuizCards, ...cards.flat(), ...albumResults.flatMap((result) => result.cards)].filter(Boolean);
     traces.innerHTML = shuffle(allCards).join('');
     summary.textContent = `${tracks.length} top songs · ${albums.length} top albums · ${artists.length} top artists`;
     prepareBoardCards();
