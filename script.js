@@ -529,8 +529,12 @@ function formationYearFactFromBio(text) {
 
 function labelFactFromBio(text) {
   const body = String(text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-  const match = body.match(/\b(?:signed to|signed with|recorded for|released on)\s+(?:the\s+)?([A-Z][A-Za-z0-9&.' -]{2,55}?)(?:\s+(?:Records|Recordings|label)|[,;.])/i);
-  const answer = match?.[1]?.trim();
+  const patterns = [
+    /\b(?:released|issued)\b[^.]{0,120}?\b(?:through|via|by)\s+(?:the\s+)?([A-Z][A-Za-z0-9&.' -]{2,55}?)(?:[,;.])/i,
+    /\b(?:signed to|signed with|recorded for)\s+(?:the\s+)?([A-Z][A-Za-z0-9&.' -]{2,55}?)(?:\s+(?:Records|Recordings|label)\b|[,;.])/i,
+    /\b(?:released|issued)\s+on\s+(?:the\s+)?([A-Z][A-Za-z0-9&.' -]{2,55}?(?:Records|Recordings|label))\b/i,
+  ];
+  const answer = patterns.map((pattern) => body.match(pattern)?.[1]?.trim()).find((value) => value && !/\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b|\b(?:18|19|20)\d{2}\b/i.test(value));
   return answer && answer.length < 55 ? { type: 'label', answer } : null;
 }
 
