@@ -91,3 +91,18 @@
 .source-grid-live:has(.wiki-summary:hover,.citation-source:hover,.lastfm-source:hover,.quiz-source:hover,.lrclib-source:hover) :is(.wiki-summary,.citation-source,.lastfm-source,.quiz-source,.lrclib-source):not(:hover){opacity:.32;filter:brightness(.9)}
 .source-grid-live:has(.quiz-source:hover) :is(.wiki-summary,.citation-source,.lastfm-source,.quiz-source,.lrclib-source,.media-source):not(.quiz-source:hover){opacity:.05;filter:blur(10px) brightness(.55);pointer-events:none}.source-grid-live:has(.quiz-source:hover) .quiz-source:hover{position:relative;z-index:2}
 @media(max-width:720px){.lastfm-source.album{grid-column:span 1;grid-row:span 2}}
+
+/* Keep every fixed-size note self-contained. Long copy scrolls inside its note
+   instead of running beneath the attribution or outbound-link control. */
+.source-grid-live>:is(.wiki-summary,.citation-source,.lastfm-source,.quiz-source,.lrclib-source,.media-source){overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.media-source{padding-bottom:38px}
+.media-source .media-coverage{padding-right:2px;padding-bottom:4px;pointer-events:auto;overscroll-behavior:contain}
+.media-source .media-origin{flex:0 0 auto;margin-top:8px;padding-right:25px}
+.citation-source{display:flex;flex-direction:column;padding-bottom:38px}
+.citation-source .citation-excerpt{display:block;flex:1;min-height:0;max-height:none;overflow:auto;-webkit-line-clamp:unset;overscroll-behavior:contain}
+.lastfm-source.has-description>div{min-height:100%;overflow:hidden}
+.lastfm-source.artist.has-description>div p,.lastfm-source.album.has-description>div p,.lastfm-source.track.has-description>div p{min-height:0;padding-bottom:4px;overscroll-behavior:contain}
+.lrclib-source{display:flex;flex-direction:column;padding-bottom:42px}
+.lrclib-source q{flex:1;min-height:0;overflow:auto;padding-right:3px;overscroll-behavior:contain}
+.lrclib-source span{flex:0 0 auto;margin-top:10px}
+.quiz-source{padding-bottom:36px}
