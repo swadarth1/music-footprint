@@ -423,7 +423,9 @@ async function wikipediaCard(artist, listeningStat, options = {}) {
     return paragraph.outerHTML;
   }).join('') || `<p>${escapeHtml(page.extract)}</p>`;
   const imageUrl = page.originalimage?.source || page.thumbnail?.source;
-  const image = imageUrl ? `<img class="wiki-image" src="${imageUrl}" alt="" />` : '<div class="wiki-image"></div>';
+  // Do not reserve a blank art square when Wikipedia has no lead image: the
+  // summary should use the full card width in that case.
+  const image = imageUrl ? `<img class="wiki-image" src="${imageUrl}" alt="" />` : '';
   const normalizeCitationText = (value) => {
     const text = String(value || '');
     let decoded = text;
@@ -457,7 +459,7 @@ async function wikipediaCard(artist, listeningStat, options = {}) {
     .filter((citation, index, list) => list.findIndex((item) => item.url === citation.url) === index)
     .slice(0, 4);
   const wikiUrl = page.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(result.title)}`;
-  const wiki = `<article class="wiki-summary" data-card-id="wiki-${encodeURIComponent(artist)}"><div class="wiki-header"><span class="personal-stat">${escapeHtml(listeningStat)}</span><img class="wiki-logo" src="https://upload.wikimedia.org/wikipedia/commons/6/63/Wikipedia-logo.png" alt="Wikipedia" /></div><div class="wiki-copy">${image}${formattedText}</div><a class="wiki-open" href="${wikiUrl}" target="_blank" rel="noreferrer" aria-label="Open Wikipedia source">↗</a></article>`;
+  const wiki = `<article class="wiki-summary${imageUrl ? '' : ' no-wiki-image'}" data-card-id="wiki-${encodeURIComponent(artist)}"><div class="wiki-header"><span class="personal-stat">${escapeHtml(listeningStat)}</span><img class="wiki-logo" src="https://upload.wikimedia.org/wikipedia/commons/6/63/Wikipedia-logo.png" alt="Wikipedia" /></div><div class="wiki-copy">${image}${formattedText}</div><a class="wiki-open" href="${wikiUrl}" target="_blank" rel="noreferrer" aria-label="Open Wikipedia source">↗</a></article>`;
   const citationCards = await Promise.all(citations.map((citation, index) => citationCard(citation, listeningStat, artist, wikiUrl, index)));
   return [wiki, ...citationCards];
 }
