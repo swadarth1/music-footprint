@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Afterglow — your music's digital footprint</title>
+    <title>untitled digital music footprint app</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Playfair+Display:ital,wght@600;700&display=swap" rel="stylesheet" />
@@ -12,7 +12,7 @@
   <body>
     <main class="shell" id="landing" hidden>
       <nav class="nav">
-        <a class="wordmark" href="#top" aria-label="Afterglow home"><span class="spark">✦</span> afterglow</a>
+        <a class="wordmark" href="#top" aria-label="untitled digital music footprint app home"><span class="spark">✦</span> untitled digital music footprint app</a>
         <div class="nav-links"><a href="#how">How it works</a><a href="#sources">Sources</a></div>
         <button class="text-button" data-scroll="#setup">Get started <span>↗</span></button>
       </nav>
@@ -20,7 +20,7 @@
       <section id="top" class="hero">
         <p class="eyebrow">LISTENING, IN CONTEXT</p>
         <h1>The internet around<br />the music <em>you loved.</em></h1>
-        <p class="hero-copy">Afterglow turns your Last.fm history into a living archive: the discussions, reviews, videos, artifacts, and small corners of the web that surrounded every listen.</p>
+        <p class="hero-copy">untitled digital music footprint app turns your Last.fm history into a living archive: the discussions, reviews, videos, artifacts, and small corners of the web that surrounded every listen.</p>
         <button class="primary-button" data-scroll="#setup">Find my footprint <span>→</span></button>
         <div class="hero-orbit" aria-hidden="true">
           <div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="orbit orbit-three"></div>
@@ -66,10 +66,10 @@
 
       <section class="decision-note"><p class="eyebrow">A FEW DECISIONS, EARLY</p><div><h2>Useful by default.<br />Intentional by design.</h2><ul><li><b>Private by default.</b> Listening history remains yours; shareable archives are opt-in.</li><li><b>Source-aware.</b> Every finding links to its origin and labels what is editorial, community, or marketplace material.</li><li><b>Quality over volume.</b> Recaps surface a few genuinely interesting trails—not a pile of search results.</li></ul></div></section>
 
-      <footer><a class="wordmark" href="#top"><span class="spark">✦</span> afterglow</a><p>For the stories behind the songs.</p><span>© 2026</span></footer>
+      <footer><a class="wordmark" href="#top"><span class="spark">✦</span> untitled digital music footprint app</a><p>For the stories behind the songs.</p><span>© 2026</span></footer>
     </main>
     <main id="archive" class="archive">
-      <nav class="archive-nav"><span class="archive-mark">listening archive</span><span class="archive-issue" id="issue">UNCONFIGURED</span></nav>
+      <nav class="archive-nav"><span class="archive-mark">untitled digital music footprint app</span><span class="archive-issue" id="issue">UNCONFIGURED</span></nav>
       <section class="board-setup"><form id="board-form"><label>Last.fm username<span class="lastfm-input"><img src="/assets/lastfm-logo.png" alt="Last.fm" /><input id="board-username" required placeholder="username" autocomplete="username" /></span></label><label>Range<select id="board-period"><option value="7day">Last week</option><option value="1month" selected>Last month</option><option value="6month">Last 6 months</option><option value="12month">Last year</option><option value="ytd">Year to date</option><option value="5year">Last 5 years</option><option value="overall">All time</option><option value="custom">Custom</option></select></label><div class="custom-range" id="custom-range" hidden><label>From <input id="range-start" type="date" /></label><label>To <input id="range-end" type="date" /></label></div><div class="setup-limits" aria-label="Listening board limits"><label>Top <input id="limit-songs" type="number" min="0" max="20" step="1" value="6" disabled /> songs</label><label>Top <input id="limit-albums" type="number" min="0" max="20" step="1" value="6" disabled /> albums</label><label>Top <input id="limit-artists" type="number" min="0" max="20" step="1" value="6" disabled /> artists</label></div><section class="selection-preview" id="selection-preview" aria-live="polite" hidden><p id="selection-preview-status">Enter a Last.fm username to preview your board.</p><div id="selection-preview-results"></div></section><button type="submit">Build board <span>→</span></button><small>Your Last.fm key is configured locally and never sent to the browser.</small></form></section>
       <section class="board-meta" id="board-meta" hidden><div class="board-overview"><p id="listening-summary"></p></div><button id="edit-board">Edit listening inputs</button></section>
       <section class="board-visibility" id="board-visibility" hidden aria-label="Visible board components"><span>Show</span><label><input type="checkbox" data-component="wiki" checked /><i></i>Wikipedia</label><label class="article-limit-control">Articles <input id="article-limit" type="range" min="0" max="4" step="1" value="3" /><output id="article-limit-value">3</output></label><label><input type="checkbox" data-component="media" checked /><i></i>Media</label><label><input type="checkbox" data-component="track" checked /><i></i>Last.fm tracks</label><label><input type="checkbox" data-component="album" checked /><i></i>Last.fm albums</label><label><input type="checkbox" data-component="artist" checked /><i></i>Last.fm artists</label><label><input type="checkbox" data-component="quiz" checked /><i></i>Quizzes</label><label><input type="checkbox" data-component="lyrics" checked /><i></i>Lyrics</label></section>
