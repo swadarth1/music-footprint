@@ -89,7 +89,7 @@
 .citation-source .citation-label .citation-brand b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .citation-source .personal-stat{right:14px}
 .source-grid-live:has(.wiki-summary:hover,.citation-source:hover,.lastfm-source:hover,.quiz-source:hover,.lrclib-source:hover) :is(.wiki-summary,.citation-source,.lastfm-source,.quiz-source,.lrclib-source):not(:hover){opacity:.32;filter:brightness(.9)}
-.source-grid-live:has(.quiz-source:hover) :is(.wiki-summary,.citation-source,.lastfm-source,.quiz-source,.lrclib-source,.media-source):not(.quiz-source:hover){opacity:.05;filter:blur(10px) brightness(.55);pointer-events:none}.source-grid-live:has(.quiz-source:hover) .quiz-source:hover{position:relative;z-index:2}
+.source-grid-live:has(.quiz-source:hover) :is(.wiki-summary,.citation-source,.lastfm-source,.quiz-source,.lrclib-source,.media-source):not(.quiz-source:hover){opacity:.32;filter:brightness(.9);pointer-events:none}.source-grid-live:has(.quiz-source:hover) :is(.wiki-summary,.citation-source,.lastfm-source,.lrclib-source,.media-source):not(.quiz-source:hover) :is(p,q,span,small,b,em,strong,.citation-excerpt,.citation-origin,.media-coverage,.media-origin){filter:blur(5px)}.source-grid-live:has(.quiz-source:hover) .quiz-source:hover{position:relative;z-index:2}
 @media(max-width:720px){.lastfm-source.album{grid-column:span 1;grid-row:span 2}}
 
 /* Keep every fixed-size note self-contained. Long copy scrolls inside its note
