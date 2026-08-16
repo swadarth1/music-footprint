@@ -843,7 +843,13 @@ form.addEventListener('submit', async (event) => {
       const artistStat = playLabel(artist.playcount, period);
       let details;
       const getDetails = async () => {
-        if (!details) details = await apiRequest('artist.getInfo', artist.mbid ? { mbid: artist.mbid } : { artist: artist.name }).catch(() => ({}));
+        if (!details) {
+          details = await apiRequest('artist.getInfo', artist.mbid ? { mbid: artist.mbid } : { artist: artist.name }).catch(() => ({}));
+          // Top-artist MBIDs can be stale or refer to a merged Last.fm record.
+          // Retry by the displayed artist name so a bad MBID does not create an
+          // empty artist card.
+          if (!details.artist || details.error) details = await apiRequest('artist.getInfo', { artist: artist.name }).catch(() => ({}));
+        }
         return details;
       };
       const wiki = await wikipediaCard(artist.name, artistStat, { mbid: artist.mbid, getBio: async () => {
